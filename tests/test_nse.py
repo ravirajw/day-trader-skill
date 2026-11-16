@@ -61,6 +61,12 @@ class Symbols(unittest.TestCase):
             tsla_as("BAJAJ-AUTO.NS")["chart"]["result"][0]]}]}}
         self.assertEqual(list(scan.parse_spark(json.dumps(spark))), ["BAJAJ-AUTO.NS"])
 
+    def test_an_ampersand_does_not_cut_the_spark_list_short(self):
+        path = scan.spark_path(["ITC.NS", "M&M.NS", "MARUTI.NS", "BAJAJ-AUTO.NS"], "3mo", "1d")
+        self.assertIn("symbols=ITC.NS,M%26M.NS,MARUTI.NS,BAJAJ-AUTO.NS&range=3mo", path)
+        self.assertEqual(path.count("&"), 2)  # only the &range and &interval separators
+        self.assertIn("symbols=BRK-B,AAPL&", scan.spark_path(["BRK.B", "AAPL"], "3mo", "1d"))
+
     def test_risk_and_time_machine_accept_long_ns_tickers(self):
         for sym in ("RELIANCE.NS", "BAJAJ-AUTO.NS", "M&M.NS", "HDFCBANK.NS"):
             self.assertTrue(risk.TICKER.match(sym), sym)

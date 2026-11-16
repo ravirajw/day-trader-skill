@@ -77,6 +77,7 @@ import re
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 UA = "Mozilla/5.0 (compatible; day-trader-skill/2.0; +https://github.com/Jakeschincariol/day-trader-skill)"
@@ -258,8 +259,9 @@ def to_yahoo(sym):
 
 
 def spark_path(symbols, rng, interval):
+    # each symbol is escaped: an & (M&M.NS) would otherwise end the symbols list
     return "/v7/finance/spark?symbols=%s&range=%s&interval=%s" % (
-        ",".join(to_yahoo(s) for s in symbols), rng, interval)
+        ",".join(urllib.parse.quote(to_yahoo(s), safe=".-^=") for s in symbols), rng, interval)
 
 
 def chart_path(sym, rng, interval):
@@ -897,13 +899,15 @@ def cmd_daily(a):
     local = to_ist(now)
     print("Daily scan, %s IST, closes through %s (Yahoo spark, daily closes only)." % (
         local.strftime("%a %Y-%m-%d %H:%M"), last_date.isoformat() if last_date else "nothing"))
-    print("Fetched %s of %s charts%s. %s passed the liquidity filter ($%s+ and %s+ shares)%s; "
-          "%s scanned." % ("{:,}".format(counts["fetched"]), "{:,}".format(len(symbols)),
-                           (" (%s failed or had no data)" % "{:,}".format(nfailed)) if nfailed else "",
-                           "{:,}".format(counts["fetched"] - counts["illiquid"]), _n(a.min_price),
-                           "{:,}".format(a.min_volume),
-                           (", %d had under %d days" % (counts["short"], MIN_DAILY_BARS)) if counts["short"] else "",
-                           "{:,}".format(counts["scanned"])))
+    nse_list = bool(symbols) and all(is_nse(x) for x in symbols)
+    line = ("Fetched %s of %s charts%s. %s passed the liquidity filter ($%s+ and %s+ shares)%s; "
+            "%s scanned." % ("{:,}".format(counts["fetched"]), "{:,}".format(len(symbols)),
+                             (" (%s failed or had no data)" % "{:,}".format(nfailed)) if nfailed else "",
+                             "{:,}".format(counts["fetched"] - counts["illiquid"]), _n(a.min_price),
+                             "{:,}".format(a.min_volume),
+                             (", %d had under %d days" % (counts["short"], MIN_DAILY_BARS)) if counts["short"] else "",
+                             "{:,}".format(counts["scanned"])))
+    print(line.replace("$", "\u20b9") if nse_list else line)
     if hits:
         per = [(k, sum(1 for h in hits if k in h["setups"])) for k, _ in SETUPS]
         print("%d chart%s matched a setup: %s." % (len(hits), "" if len(hits) == 1 else "s",
