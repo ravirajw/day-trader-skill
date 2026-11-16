@@ -14,7 +14,7 @@ check = load("trader-risk", "check")
 CFG_PATH = os.path.join(ROOT, "trader-budget", "config.example.json")
 ORDERS_PATH = os.path.join(FIX, "trader-risk", "orders-tsla.json")
 PLAN_PATH = os.path.join(FIX, "trader-budget", "plan-tsla.json")
-NOW = "2026-10-19 10:15"
+NOW = "2026-10-19 10:00"   # IST, the 9:55 bar just closed
 TODAY = "2026-10-19"
 AAPL = {"symbol": "AAPL", "side": "buy", "notional": "1250", "type": "market", "time_in_force": "day"}
 BATCH = ["AAPL", "AXP", "GOOGL", "KO", "BAC"]
@@ -103,6 +103,23 @@ class DesktopConfig(unittest.TestCase):
             self.assertIn("NEVER_IN_CHAT", server["env"][k])
 
 
+class Nse(unittest.TestCase):
+    def test_an_nse_ticket_is_in_rupees(self):
+        o = {"symbol": "RELIANCE.NS", "side": "buy", "qty": "4", "type": "market", "time_in_force": "day",
+             "order_class": "bracket", "take_profit_limit_price": "1437.50", "stop_loss_stop_price": "1400.00",
+             "plan": {"entry": 1412.5, "stop": 1400.0, "target": 1437.5}}
+        text = ticket.plain(o)
+        self.assertIn("BUY 4 RELIANCE.NS", text)
+        self.assertIn("max loss about \u20b950 if the stop fills at 1400.00", text)
+        self.assertNotIn("$", text)
+        self.assertIn("\u20b912,500", ticket.plain({"symbol": "TCS.NS", "side": "buy", "notional": "12500",
+                                                     "type": "market", "time_in_force": "day"}))
+        self.assertIn("$1,250", ticket.plain(AAPL))
+
+    def test_stamps_carry_the_ist_offset(self):
+        self.assertEqual(ticket.ist_iso(ticket.parse_now("2026-10-19 10:00")), "2026-10-19T10:00:00+05:30")
+
+
 class Flow(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp()
@@ -169,13 +186,13 @@ class Flow(unittest.TestCase):
 
         code, text, _ = run(self.args("result", "--index", "1", "--status", "placed", "--broker-id", "abc123",
                                       "--filled-qty", "8", "--filled-price", "364.20", "--portfolio", self.pf,
-                                      now="2026-10-19 10:16"))
+                                      now="2026-10-19 10:01"))
         self.assertEqual(code, 0)
         st = self.state_doc()
         self.assertEqual([r["status"] for r in st["orders"]], ["approved", "placed", "filled"])
         appr, plc = st["orders"][0], st["orders"][1]
         self.assertEqual((appr["reply"], appr["kind"], appr["max_loss"], appr["date"]), ("yes", "entry", 46.88, TODAY))
-        self.assertEqual(appr["at"], "2026-10-19T10:15:00-04:00")
+        self.assertEqual(appr["at"], "2026-10-19T10:00:00+05:30")
         self.assertEqual((plc["broker_order_id"], plc["max_loss"], plc["kind"]), ("abc123", 46.88, "entry"))
         with open(self.pf) as fh:
             pf = json.load(fh)
@@ -189,7 +206,7 @@ class Flow(unittest.TestCase):
         self.assertIn("max loss $46.88", text)
 
         # trader-risk now counts it: a second TSLA buy today is a duplicate, and $46.88 is used
-        res = check.check([tsla()], {"budget": 5000}, state=st, now=check.parse_now("2026-10-19 10:30"))
+        res = check.check([tsla()], {"budget": 5000}, state=st, now=check.parse_now("2026-10-19 10:15"))
         self.assertIn("already placed today", " ".join(res["results"][0]["reasons"]))
         self.assertEqual((res["today"]["entries_placed"], res["today"]["loss_at_risk"]), (1, 46.88))
 
@@ -198,18 +215,23 @@ class Flow(unittest.TestCase):
         run(self.args("approve", "--index", "1", "--reply", "yes"))
         run(self.args("result", "--index", "1", "--status", "placed", "--broker-id", "abc",
                       "--filled-qty", "8", "--filled-price", "364.20", "--portfolio", self.pf))
-        late = "2026-10-19 15:55"
+        late = "2026-10-19 15:15"
+        plan = os.path.join(self.d, "plan.json")
+        with open(PLAN_PATH) as fh:
+            doc = dict(json.load(fh), flat_by="15:15")       # the plan as trader-exit writes it for NSE
+        with open(plan, "w") as fh:
+            json.dump(doc, fh)
         code, text, _ = run(["flatten", "--symbol", "TSLA", "--orders", self.orders, "--portfolio", self.pf,
-                             "--plan", PLAN_PATH, "--config", self.cfg, "--now", late])
+                             "--plan", plan, "--config", self.cfg, "--now", late])
         self.assertEqual(code, 0)
-        self.assertIn("SELL 8 shares of TSLA, market order, good for today (flat by 15:55 New York)", text)
+        self.assertIn("SELL 8 shares of TSLA, market order, good for today (flat by 15:15 IST)", text)
         self.assertIn("replaced 1 earlier proposal", text)
         self.assertIn("cancel_order_by_id", text)
         with open(self.orders) as fh:
             doc = json.load(fh)
         self.assertEqual(ticket.tool_input(doc["orders"][0]),
                          {"symbol": "TSLA", "side": "sell", "qty": "8", "type": "market", "time_in_force": "day"})
-        self.assertEqual(self.run_risk(now=late), 0)       # after the 15:30 entry cutoff: an exit still passes
+        self.assertEqual(self.run_risk(now=late), 0)       # after the 15:00 entry cutoff: an exit still passes
         with open(self.risk) as fh:
             self.assertEqual(json.load(fh)["results"][0]["kind"], "exit")
         code, text, _ = run(self.args("show", now=late))
@@ -217,7 +239,7 @@ class Flow(unittest.TestCase):
         self.assertIn("READY", text)
         self.assertEqual(run(self.args("approve", "--index", "1", "--reply", "yes sell 8 TSLA", now=late))[0], 0)
         code, _, _ = run(self.args("result", "--index", "1", "--status", "placed", "--filled-qty", "8",
-                                   "--filled-price", "366.10", "--portfolio", self.pf, now="2026-10-19 15:56"))
+                                   "--filled-price", "366.10", "--portfolio", self.pf, now="2026-10-19 15:16"))
         self.assertEqual(code, 0)
         with open(self.pf) as fh:
             pf = json.load(fh)
@@ -247,15 +269,15 @@ class Flow(unittest.TestCase):
         self.assertIn("was not in the last risk check", text)
 
     def test_yesterdays_check_does_not_count(self):
-        self.run_risk(now="2026-10-16 10:15")
+        self.run_risk(now="2026-10-16 10:00")
         code, text, _ = run(self.args("show", "--index", "1"))
         self.assertIn("not today", text)
 
     def test_blocked_orders_are_never_ready(self):
-        self.assertEqual(self.run_risk(now="2026-10-19 09:40"), 1)
-        code, text, _ = run(self.args("show", "--index", "1", now="2026-10-19 09:40"))
-        self.assertIn("BLOCKED by trader-risk: window: no new entries before 09:45", text)
-        code, _, _ = run(self.args("approve", "--index", "1", "--reply", "yes", now="2026-10-19 09:40"))
+        self.assertEqual(self.run_risk(now="2026-10-19 09:25"), 1)
+        code, text, _ = run(self.args("show", "--index", "1", now="2026-10-19 09:25"))
+        self.assertIn("BLOCKED by trader-risk: window: no new entries before 09:30", text)
+        code, _, _ = run(self.args("approve", "--index", "1", "--reply", "yes", now="2026-10-19 09:25"))
         self.assertEqual(code, 1)
 
     def test_result_needs_an_approval_and_decline_is_logged(self):

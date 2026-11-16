@@ -13,7 +13,7 @@ CFG = os.path.join(ROOT, "trader-budget", "config.example.json")
 PLAN = os.path.join(FIX, "trader-budget", "plan-tsla.json")
 TARGETS = os.path.join(ROOT, "trader-budget", "targets.example.json")
 TOP5 = os.path.join(FIX, "trader-budget", "berkshire-q2-2026-top5.json")
-NOW = "2026-10-19 10:15"
+NOW = "2026-10-19 10:00"   # IST, the 9:55 bar just closed
 TODAY = "2026-10-19"
 REEL_V1 = {"AAPL": 1250, "AXP": 1119, "GOOGL": 823, "KO": 708, "BAC": 600}
 PRICES = {"AAPL": 341.27, "AXP": 309.84, "GOOGL": 353.78, "KO": 90.11, "BAC": 53.96}
@@ -22,7 +22,7 @@ CONTRACT_CFG = {
     "budget": 5000, "cash_buffer_pct": 10, "max_position_pct": 75, "max_order_usd": 4000, "min_order_usd": 5,
     "max_loss_per_trade_usd": 50, "max_daily_loss_usd": 150, "max_trades_per_day": 3, "max_orders_per_day": 10,
     "min_reward_risk": 1.0, "require_stop": True,
-    "no_entries_before": "09:45", "no_entries_after": "15:30", "flat_by": "15:55",
+    "no_entries_before": "09:30", "no_entries_after": "15:00", "flat_by": "15:15",
     "fractional": False, "broker": "alpaca", "paper": True, "blocked": [],
     "allow_options": False, "allow_margin": False, "allow_short": False, "pdt_guard": False,
     "sec_user_agent": "Your Name you@example.com",
@@ -68,7 +68,7 @@ def run(argv):
     return code, out.getvalue(), err.getvalue()
 
 
-def prices_doc(price, quote_time="2026-10-19T14:52:13Z"):
+def prices_doc(price, quote_time="2026-10-19T05:07:13Z"):   # 10:37:13 IST
     return {"as_of": quote_time, "source": "yahoo", "prices": {"TSLA": price},
             "detail": {"TSLA": {"prev_close": 354.72, "time": quote_time, "source": "yahoo"}}}
 
@@ -105,6 +105,21 @@ class TheReel(unittest.TestCase):
         self.assertIn("bound by your $50 max loss", why)
         self.assertIn("$46.88", why)
 
+    def test_an_nse_trade_is_sized_in_rupees(self):
+        nse = plan(symbol="RELIANCE.NS", entry=1412.5, stop=1400.0, target=1437.5, risk_per_share=12.5,
+                   flat_by="15:15")
+        s = size.size_trade(nse, cfg(), today=TODAY)
+        self.assertEqual((s["qty"], s["bound_by"], s["cost"], s["max_loss"]), (2, "position cap", 2825.0, 25.0))
+        o = size.bracket_order(s)
+        self.assertEqual(o["symbol"], "RELIANCE.NS")
+        self.assertIn("\u20b925 at the stop", o["why"])
+        text = size.plan_report(s, o)
+        self.assertIn("Size: 2 shares of RELIANCE.NS = \u20b92,825 at 1412.50", text)
+        self.assertIn("Flat by 15:15 IST", text)
+        self.assertNotIn("$", text)
+        far = size.size_trade(dict(nse, stop=1300.0), cfg(), today=TODAY)
+        self.assertIn("more than your \u20b950 max loss per trade", far["refusal"])
+
     def test_the_fixture_orders_file_is_what_it_writes(self):
         with open(os.path.join(FIX, "trader-risk", "orders-tsla.json")) as fh:
             fixture = json.load(fh)["orders"][0]
@@ -131,7 +146,7 @@ class TheReel(unittest.TestCase):
                 doc = json.load(fh)
             self.assertEqual(doc["status"], "proposed")
             self.assertIs(doc["paper"], True)
-            self.assertEqual(doc["created_at"], "2026-10-19T14:15:00Z")
+            self.assertEqual(doc["created_at"], "2026-10-19T04:30:00Z")
             self.assertEqual(len(doc["orders"]), 1)
             self.assertEqual(doc["orders"][0]["plan"]["max_loss"], 46.88)
 
@@ -188,11 +203,11 @@ class PlanRules(unittest.TestCase):
             with open(pp, "w") as fh:
                 json.dump(prices_doc(366.475), fh)
             base = ["--plan", PLAN, "--config", CFG, "--portfolio", os.path.join(d, "none"), "--prices", pp, "--json"]
-            code, text, _ = run(base + ["--now", "2026-10-19 10:55"])
+            code, text, _ = run(base + ["--now", "2026-10-19 10:40"])
             out = json.loads(text)
             self.assertEqual((code, out["sizing"]["qty"], out["orders"]), (1, 6, []))
             self.assertIn("above the plan's entry", out["notes"][0])
-            out = json.loads(run(base + ["--now", "2026-10-19 11:30"])[1])
+            out = json.loads(run(base + ["--now", "2026-10-19 11:15"])[1])
             self.assertEqual(out["sizing"]["qty"], 8)
             self.assertIn("not used", out["notes"][0])
 
