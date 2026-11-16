@@ -33,7 +33,7 @@ python3 "${CLAUDE_SKILL_DIR}/news.py" --no-sec --json
 
 | file / feed | what |
 | --- | --- |
-| `--tickers`, else `trader/watchlist.json` | the scanner's hits (trader-scanner) |
+| `--tickers`, else `trader/watchlist-daily.json` and `trader/watchlist.json` | the scanner's daily hits and opening-range hits (trader-scanner) |
 | `trader/plan.json` | the trade you are planning (trader-exit) |
 | `trader/portfolio.json` | what you hold (trader-broker records fills there) |
 | Yahoo Finance headline RSS | `https://feeds.finance.yahoo.com/rss/2.0/headline?s=TSLA&region=US&lang=en-US` |

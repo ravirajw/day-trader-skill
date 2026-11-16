@@ -2,9 +2,9 @@
 """Chart Scanner for trader-scanner: scan thousands of charts for setups. Standard library only.
 
     python3 scan.py universe                          # Nasdaq Trader lists -> trader/universe.txt
-    python3 scan.py daily                             # before the open: daily setups -> trader/watchlist.json
+    python3 scan.py daily                             # after the close or before the open -> trader/watchlist-daily.json
     python3 scan.py daily --symbols TSLA,NVDA,AMD     # or --watchlist FILE, or --limit 200
-    python3 scan.py orb                               # after 9:35 AM IST: opening-range breakouts so far
+    python3 scan.py orb                               # after 9:35 AM IST: breakouts in watchlist-daily.json -> trader/watchlist.json
     python3 scan.py orb --at 10:15 --or-minutes 15    # cut the clock at 10:15 AM IST
     python3 scan.py orb --offline wall5m.json.gz --now "2026-10-19 10:15" --min-price 0
 
@@ -25,10 +25,11 @@ universe  Downloads Nasdaq Trader's symbol directories (nasdaqlisted.txt and
             5. out: the name still says unit, right, bond, preferred or preference
             6. in: everything else (plain names like "AMETEK, Inc.")
 
-daily     Pre-market scan of daily CLOSES (Yahoo spark: 20 symbols a request,
-          3 months of 1-day bars, closes only). Liquidity from the spark meta:
-          regularMarketPrice >= --min-price (5) and regularMarketVolume >=
-          --min-volume (1,000,000). Setups, from closes only:
+daily     Scan of daily CLOSES, after the close or before the open (Yahoo
+          spark: 20 symbols a request, 3 months of 1-day bars, closes only).
+          Liquidity from the spark meta: regularMarketPrice >= --min-price (5)
+          and regularMarketVolume >= --min-volume (1,000,000). Setups, from
+          closes only:
             breakout_20d     the last close is above every close of the 20 before it
             bull_flag        up more than 10 % over the 10 sessions before the
                              last 5, then the last 5 closes inside a 5 % range
@@ -92,6 +93,8 @@ BAR_MIN = 5
 MAX_CONFIRM = 200   # stage-2 v8 charts per orb scan, most traded first
 MIN_DAILY_BARS = 30
 DEFAULT_UNIVERSE = "trader/universe.txt"
+DAILY_WATCHLIST = "trader/watchlist-daily.json"   # daily writes it, orb reads it
+ORB_WATCHLIST = "trader/watchlist.json"           # orb writes it, trader-entry reads it
 DAILY_MIN_VOLUME = 1000000  # shares a day, for daily when neither --min-volume nor config sets it
 NOTE = "A scan is a list of charts that match a rule, not a list of stocks to buy."
 
@@ -182,6 +185,38 @@ def trading_day(d):
     if name:
         return False, "NSE holiday: " + name
     return True, ""
+
+
+def previous_trading_day(d):
+    """The last NSE trading day before d (weekends and the NSE holiday list skipped)."""
+    p = d - datetime.timedelta(days=1)
+    for _ in range(30):
+        if trading_day(p)[0]:
+            return p
+        p -= datetime.timedelta(days=1)
+    raise ScanError("no NSE trading day in the 30 days before %s" % d.isoformat())
+
+
+def check_daily_list_fresh(path, day):
+    """orb's daily list must be the daily scan of the last close before today's session
+    (the previous NSE trading day). An older list would scan stale setups, so stop."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except ValueError as e:
+        raise ScanError("%s is not valid JSON: %s" % (path, e))
+    if not isinstance(doc, dict):
+        raise ScanError("%s is not a daily scan. Stopped, nothing was scanned. Run /trader-scanner daily "
+                        "first, then orb again." % path)
+    mode = doc.get("mode")
+    as_of = str(doc.get("as_of") or "")
+    want = previous_trading_day(day).isoformat()
+    if mode != "daily" or as_of[:10] != want:
+        raise ScanError("%s is not the daily scan of the last close (it is mode %s, as of %s; the last NSE "
+                        "close before %s is %s). Stopped, nothing was scanned. Run /trader-scanner daily "
+                        "first, then orb again." % (path, mode or "unknown", as_of or "unknown",
+                                                    day.isoformat(), want))
+    return doc
 
 
 def session(d):
@@ -757,13 +792,28 @@ def fetch_spark(symbols, rng, interval, pause, a=None):
     return data, failed
 
 
-def read_symbols(a, offline_syms=None):
+def read_symbols(a, offline_syms=None, daily_list=None, day=None):
+    """The symbols to scan. orb passes daily_list (trader/watchlist-daily.json) and the scan
+    day: with no --symbols, --watchlist or --universe it scans that file and nothing else,
+    and only when it is the daily scan of the previous NSE trading day's close."""
     if a.symbols:
         syms = [s for s in re.split(r"[,\s]+", a.symbols.upper()) if s]
     elif a.watchlist:
         syms = symbols_from_file(a.watchlist)
     elif offline_syms is not None and not a.universe:
         syms = sorted(offline_syms)  # offline: every chart in the file, unless a list was given
+    elif daily_list and not a.universe:
+        if not os.path.exists(daily_list):
+            raise ScanError("no %s yet: run `scan.py daily` first, after the close or before the open "
+                            "(it writes that file), or pass --symbols / --watchlist" % daily_list)
+        if day is None:
+            raise ScanError("internal: the daily list needs the scan day to check its date")
+        doc = check_daily_list_fresh(daily_list, day)
+        syms = symbols_from_file(daily_list)
+        if not syms:
+            raise ScanError("%s has no stocks: the daily scan of %s found no setups. Nothing to scan. "
+                            "Run /trader-scanner orb --symbols ... to scan stocks of your own choice."
+                            % (daily_list, doc.get("as_of")))
     elif not a.universe and read_config(getattr(a, "config", None)).get("watchlist"):
         syms = symbols_from_file(read_config(a.config)["watchlist"])  # your own list beats the US universe
     else:
@@ -954,7 +1004,7 @@ def cmd_orb(a):
                 if at is None:
                     raise ScanError("offline replay: give --at HH:MM or --now \"YYYY-MM-DD HH:MM\"")
     day, cutoff = orb_window(now, at, a.or_minutes, until, explicit_day)
-    symbols = read_symbols(a, offline_syms)
+    symbols = read_symbols(a, offline_syms, daily_list=DAILY_WATCHLIST, day=day)
     confirm = None
     if not a.offline:
         today = to_ist(parse_now(None)).date()
@@ -1034,30 +1084,34 @@ def main(argv=None):
     p.add_argument("--pause", type=float, default=PAUSE)
     p.add_argument("--json", action="store_true")
 
-    def common(p, min_price, min_volume):
+    def common(p, min_price, min_volume, out, config_help):
         g = p.add_mutually_exclusive_group()
         g.add_argument("--symbols", help="comma-separated tickers instead of the universe")
-        g.add_argument("--watchlist", metavar="FILE", help="a watchlist.json (hits) or a text file of tickers")
+        g.add_argument("--watchlist", metavar="FILE", help="a watchlist.json (hits) or a text file of tickers "
+                       "(orb's default: %s)" % DAILY_WATCHLIST)
         p.add_argument("--universe", help="symbol list, one SYMBOL|Name a line (default %s)" % DEFAULT_UNIVERSE)
         p.add_argument("--limit", type=int, help="scan only the first N symbols")
         p.add_argument("--min-price", type=float, default=min_price)
         p.add_argument("--min-volume", type=int, default=min_volume)
         p.add_argument("--offline", metavar="PATH", help="fixture folder or file instead of the network")
         p.add_argument("--now", help='pretend it is this time ("2026-10-19 10:15" IST, or ...Z)')
-        p.add_argument("--out", default="trader/watchlist.json")
+        p.add_argument("--out", default=out, help="where the hits go (%s)" % out)
         p.add_argument("--no-write", action="store_true")
         p.add_argument("--pause", type=float, default=PAUSE, help="seconds between requests (%.1f)" % PAUSE)
         p.add_argument("--show", type=int, default=50, help="hits to print (all are written)")
         p.add_argument("--quiet", action="store_true")
         p.add_argument("--json", action="store_true")
-        p.add_argument("--config", default="trader/config.json",
-                       help="no_entries_after, and \"watchlist\": a file of tickers used when no list is given")
+        p.add_argument("--config", default="trader/config.json", help=config_help)
 
-    p = sub.add_parser("daily", help="pre-market setups from daily closes")
-    common(p, 5.0, 1000000)
+    p = sub.add_parser("daily", help="setups from daily closes, after the close or before the open")
+    common(p, 5.0, 1000000, DAILY_WATCHLIST,
+           "daily_min_volume, and \"watchlist\": a file of tickers scanned when no --symbols / --watchlist "
+           "is given (else the US universe)")
     p.set_defaults(min_volume=None)  # then config "daily_min_volume", else 1,000,000
     p = sub.add_parser("orb", help="opening-range breakouts so far today")
-    common(p, 5.0, 0)
+    common(p, 5.0, 0, ORB_WATCHLIST,
+           "no_entries_after. orb does not use the config \"watchlist\": with no --symbols / --watchlist / "
+           "--universe it scans %s" % DAILY_WATCHLIST)
     p.add_argument("--or-minutes", type=int, default=15)
     p.add_argument("--max-confirm", type=int, default=MAX_CONFIRM,
                    help="v8 charts to fetch in stage 2, most traded first (%d; 0 = all)" % MAX_CONFIRM)

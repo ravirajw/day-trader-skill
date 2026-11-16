@@ -598,7 +598,7 @@ class Cli(unittest.TestCase):
         shutil.copy(DEMO, os.path.join("charts", "DEMO.json"))
         os.mkdir("trader")
         with open(os.path.join("trader", "watchlist.json"), "w") as fh:
-            json.dump({"created_by": "trader-scanner", "hits": [
+            json.dump({"created_by": "trader-scanner", "mode": "orb", "as_of": "2026-10-19 09:45 IST", "hits": [
                 {"symbol": "TSLA", "setups": ["orb"], "or_high": 362.18, "or_low": 354.47},
                 {"symbol": "ZZZZ", "setups": ["orb"]}, {"symbol": "DEMO", "setups": ["orb"]}]}, fh)
         code, text, _ = run(["watchlist", "--offline", "charts", "--now", "2026-10-19 10:00"])
@@ -613,6 +613,52 @@ class Cli(unittest.TestCase):
         self.assertEqual(json.loads(text)[0]["result"]["status"], "waiting")
         code, _, err = run(["watchlist", "--watchlist", "missing.json"])
         self.assertIn("run /trader-scanner first", err)
+
+    def test_watchlist_stops_unless_it_is_todays_orb_scan(self):
+        os.mkdir("charts")
+        shutil.copy(TSLA, os.path.join("charts", "TSLA.json"))
+        os.mkdir("trader")
+        path = os.path.join("trader", "watchlist.json")
+        hits = [{"symbol": "TSLA", "setups": ["orb"]}]
+        for doc in ({"mode": "orb", "as_of": "2026-10-16 10:00 IST", "hits": hits},   # an older day's breakouts
+                    {"mode": "daily", "as_of": "2026-10-16 close", "hits": hits},     # a daily list
+                    {"mode": "daily", "as_of": "2026-10-19 close", "hits": hits},     # a daily list, same date
+                    {"hits": hits}):                                                  # no date at all
+            with open(path, "w") as fh:
+                json.dump(doc, fh)
+            code, text, err = run(["watchlist", "--offline", "charts", "--now", "2026-10-19 10:00"])
+            self.assertEqual(code, 1, doc)
+            self.assertEqual(text, "", doc)                  # nothing checked, nothing printed
+            self.assertIn("not today's opening-range scan", err)
+            self.assertIn("Run /trader-scanner orb first", err)
+        with open(path, "w") as fh:
+            json.dump({"mode": "orb", "as_of": "2026-10-19 09:45 IST", "hits": hits}, fh)
+        code, text, _ = run(["watchlist", "--offline", "charts", "--now", "2026-10-19 10:00"])
+        self.assertEqual(code, 0)
+        self.assertIn("TSLA    triggered", text)
+
+
+class WatchlistDateAtMidnightIST(unittest.TestCase):
+    """"Today" is the IST date, while --now with Z (and the machine clock) is UTC,
+    5h30 behind. Around IST midnight the two dates differ."""
+
+    DOC = {"mode": "orb", "as_of": "2026-10-19 09:45 IST", "hits": [{"symbol": "TSLA"}]}
+
+    def allowed(self, now_text):
+        try:
+            entry.check_watchlist_is_today(self.DOC, "trader/watchlist.json", entry.parse_now(now_text))
+            return True
+        except entry.EntryError as e:
+            self.assertIn("not today's opening-range scan", str(e))
+            return False
+
+    def test_the_ist_date_decides(self):
+        self.assertFalse(self.allowed("2026-10-18T18:29Z"))   # 23:59 IST on the 18th: yesterday
+        self.assertTrue(self.allowed("2026-10-18T18:59Z"))    # 00:29 IST on the 19th: today, though UTC says the 18th
+        self.assertTrue(self.allowed("2026-10-19 10:00 IST"))
+        self.assertTrue(self.allowed("2026-10-19 10:00"))     # a plain --now is IST
+        self.assertFalse(self.allowed("2026-10-19T18:31Z"))   # 00:01 IST on the 20th: tomorrow, though UTC says the 19th
+        self.assertFalse(self.allowed("10:00"))               # a time only means today's real date, not the 19th
 
 
 class SkillDoc(unittest.TestCase):

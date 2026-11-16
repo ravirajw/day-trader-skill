@@ -32,7 +32,7 @@ python3 "${CLAUDE_SKILL_DIR}/entry.py" check TSLA --write          # also save t
 python3 "${CLAUDE_SKILL_DIR}/entry.py" check TSLA --setup level --level 371.20
 python3 "${CLAUDE_SKILL_DIR}/entry.py" check TSLA --interval 1m --min-volume-x 1.5
 python3 "${CLAUDE_SKILL_DIR}/entry.py" watch TSLA --until 15:00    # one line per closed bar, stops on the trigger
-python3 "${CLAUDE_SKILL_DIR}/entry.py" watchlist                   # every hit in trader/watchlist.json
+python3 "${CLAUDE_SKILL_DIR}/entry.py" watchlist                   # every hit in today's orb scan, trader/watchlist.json
 ```
 
 Other flags: `--or-minutes N` (default 15), `--json`, `--offline FILE` (a
@@ -45,7 +45,7 @@ day bar by bar without waiting.
 
 | file | what |
 | --- | --- |
-| `trader/watchlist.json` | the scanner's hits (`hits[].symbol`), for `watchlist` |
+| `trader/watchlist.json` | the scanner's opening-range hits (`hits[].symbol`), for `watchlist`. It must be today's `scan.py orb` output (`mode` orb, `as_of` today in IST): anything else, a daily list or an older day's breakouts, stops with a plain line and nothing is checked |
 | `trader/config.json` | `no_entries_before` (09:30) and `no_entries_after` (15:00), IST. Optional |
 | Yahoo chart API | today's bars, `range=1d&interval=5m` (or `1m`): free, unofficial, can lag |
 | `trader/entry.json` | with `check --write`, or when `watch` triggers: symbol, setup, status, time, bar, price, level, opening range |
@@ -76,7 +76,7 @@ day bar by bar without waiting.
 ## Steps
 
 1. Get the symbol from the user, or run `entry.py watchlist` after
-   `/trader-scanner`. Check `/trader-news` for it first.
+   today's `/trader-scanner orb` (it refuses any other file). Check `/trader-news` for it first.
 2. Run `entry.py check SYMBOL`. Tell the user the status in one line:
    waiting and how far, triggered at what time and price, or expired.
 3. To wait for it, Claude can run `entry.py watch SYMBOL --until 15:00` in

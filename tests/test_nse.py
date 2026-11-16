@@ -354,6 +354,99 @@ class ScannerWatchlistDefault(unittest.TestCase):
         self.assertEqual(run({"daily_min_volume": 100000}, "--min-volume", "5"), 5)  # typed beats config
         self.assertEqual(run({"daily_min_volume": 0}), 0)                          # 0 means no volume filter
 
+    def test_orb_reads_the_daily_list_and_daily_never_overwrites_it(self):
+        with open(os.path.join("trader", "config.json"), "w") as fh:
+            json.dump({"watchlist": "nifty50.txt"}, fh)
+        daily = os.path.join("trader", "watchlist-daily.json")
+        # no daily list yet: orb says so instead of falling back to the config list
+        tue = datetime.date(2026, 11, 17)
+        with self.assertRaises(scan.ScanError) as e:
+            scan.read_symbols(self.args(), daily_list=daily, day=tue)
+        self.assertIn("watchlist-daily.json", str(e.exception))
+        with open(daily, "w") as fh:
+            json.dump({"mode": "daily", "as_of": "2026-11-16 close",
+                       "hits": [{"symbol": "HDFCBANK.NS"}, {"symbol": "RELIANCE.NS"}]}, fh)
+        self.assertEqual(scan.read_symbols(self.args(), daily_list=daily, day=tue), ["HDFCBANK.NS", "RELIANCE.NS"])
+        self.assertEqual(scan.read_symbols(self.args(symbols="INFY.NS"), daily_list=daily, day=tue), ["INFY.NS"])
+        self.assertEqual(scan.read_symbols(self.args()), ["RELIANCE.NS", "TCS.NS", "M&M.NS"])  # daily: config list
+
+    def test_previous_trading_day_skips_weekends_and_nse_holidays(self):
+        D = datetime.date
+        self.assertEqual(scan.previous_trading_day(D(2026, 11, 17)), D(2026, 11, 16))  # Tue -> Mon
+        self.assertEqual(scan.previous_trading_day(D(2026, 11, 16)), D(2026, 11, 13))  # Mon -> Fri
+        self.assertEqual(scan.previous_trading_day(D(2026, 11, 11)), D(2026, 11, 9))   # over Diwali-Balipratipada
+        self.assertEqual(scan.previous_trading_day(D(2026, 11, 25)), D(2026, 11, 23))  # over Guru Nanak Jayanti
+
+    def test_orb_stops_on_a_daily_list_that_is_not_the_last_close(self):
+        daily = os.path.join("trader", "watchlist-daily.json")
+        tue = datetime.date(2026, 11, 17)
+        hits = [{"symbol": "HDFCBANK.NS"}]
+        stale = [{"mode": "daily", "as_of": "2026-11-13 close", "hits": hits},   # Friday's: Monday's run missed
+                 {"mode": "daily", "as_of": "2026-11-17 close", "hits": hits},   # not the previous close
+                 {"mode": "orb", "as_of": "2026-11-16 10:00 IST", "hits": hits},  # an orb file, not a daily scan
+                 {"mode": "daily", "hits": hits},                                # no date
+                 {"hits": hits},                                                 # no mode, no date
+                 [{"symbol": "HDFCBANK.NS"}]]                                    # not a scanner file at all
+        for doc in stale:
+            with open(daily, "w") as fh:
+                json.dump(doc, fh)
+            with self.assertRaises(scan.ScanError, msg=doc) as e:
+                scan.read_symbols(self.args(), daily_list=daily, day=tue)
+            self.assertIn("Stopped, nothing was scanned", str(e.exception))
+            self.assertIn("Run /trader-scanner daily", str(e.exception))
+        with open(daily, "w") as fh:
+            fh.write("{not json")
+        with self.assertRaises(scan.ScanError) as e:
+            scan.read_symbols(self.args(), daily_list=daily, day=tue)
+        self.assertIn("not valid JSON", str(e.exception))
+        # the previous close across a weekend is accepted (Monday's scan reads Friday's list)
+        with open(daily, "w") as fh:
+            json.dump({"mode": "daily", "as_of": "2026-11-13 close", "hits": hits}, fh)
+        self.assertEqual(scan.read_symbols(self.args(), daily_list=daily, day=datetime.date(2026, 11, 16)),
+                         ["HDFCBANK.NS"])
+        # the right date but no stocks: say so plainly
+        with open(daily, "w") as fh:
+            json.dump({"mode": "daily", "as_of": "2026-11-16 close", "hits": []}, fh)
+        with self.assertRaises(scan.ScanError) as e:
+            scan.read_symbols(self.args(), daily_list=daily, day=tue)
+        self.assertIn("has no stocks: the daily scan of 2026-11-16 close found no setups", str(e.exception))
+        self.assertIn("orb --symbols", str(e.exception))
+        # an explicit list skips the daily file and its date check
+        self.assertEqual(scan.read_symbols(self.args(symbols="INFY.NS"), daily_list=daily, day=tue), ["INFY.NS"])
+
+    def test_orb_command_uses_the_daily_list_and_its_date_check(self):
+        """End to end through cmd_orb: a stale daily list stops the scan before any fetch."""
+        import contextlib
+        import io
+        with open(os.path.join("trader", "watchlist-daily.json"), "w") as fh:
+            json.dump({"mode": "daily", "as_of": "2026-11-13 close", "hits": [{"symbol": "HDFCBANK.NS"}]}, fh)
+        real = scan.fetch_spark
+
+        def no_network(*args, **kw):
+            raise AssertionError("orb fetched prices with a stale daily list")
+        scan.fetch_spark = no_network
+        self.addCleanup(setattr, scan, "fetch_spark", real)
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            code = scan.main(["orb", "--now", "2026-11-17 10:00"])
+        self.assertEqual(code, 1)
+        self.assertIn("not the daily scan of the last close", err.getvalue())
+        self.assertIn("the last NSE close before 2026-11-17 is 2026-11-16", err.getvalue())
+
+    def test_default_output_files(self):
+        import contextlib
+        import io
+        seen = {}
+        real_daily, real_orb = scan.cmd_daily, scan.cmd_orb
+        scan.cmd_daily = lambda a: seen.__setitem__("daily", a.out) or 0
+        scan.cmd_orb = lambda a: seen.__setitem__("orb", a.out) or 0
+        self.addCleanup(setattr, scan, "cmd_daily", real_daily)
+        self.addCleanup(setattr, scan, "cmd_orb", real_orb)
+        with contextlib.redirect_stdout(io.StringIO()):
+            scan.main(["daily"])
+            scan.main(["orb"])
+        self.assertEqual(seen, {"daily": "trader/watchlist-daily.json", "orb": "trader/watchlist.json"})
+
     def test_without_it_the_us_universe_is_still_the_default(self):
         with self.assertRaises(scan.ScanError) as e:
             scan.read_symbols(self.args())

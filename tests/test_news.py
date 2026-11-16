@@ -91,6 +91,7 @@ class Check(unittest.TestCase):
         self.base = ["--offline", DIR, "--state", self.state, "--now", NOW,
                      "--portfolio", os.path.join(self.tmp.name, "none.json"),
                      "--watchlist", os.path.join(self.tmp.name, "none.json"),
+                     "--daily-watchlist", os.path.join(self.tmp.name, "none.json"),
                      "--plan", os.path.join(self.tmp.name, "none.json")]
 
     def tearDown(self):
@@ -130,6 +131,50 @@ class Check(unittest.TestCase):
         tickers = {t for i in json.loads(out)["items"] for t in i["touches"]}
         self.assertEqual(tickers, {"KO"})
         self.assertFalse(os.path.exists(self.state))
+
+    def test_tickers_from_the_daily_list_too(self):
+        daily = os.path.join(self.tmp.name, "watchlist-daily.json")
+        with open(daily, "w") as fh:
+            json.dump({"created_by": "trader-scanner", "mode": "daily",
+                       "hits": [{"symbol": "HDFCBANK.NS"}, {"symbol": "KO"}]}, fh)
+        wl = os.path.join(self.tmp.name, "watchlist.json")
+        with open(wl, "w") as fh:
+            json.dump({"created_by": "trader-scanner", "mode": "orb", "hits": [{"symbol": "AAPL"}]}, fh)
+        got = news.watch_from_files("/nonexistent.json", wl, "/nonexistent.json", daily)
+        self.assertEqual(sorted(got), ["AAPL", "HDFCBANK.NS", "KO"])
+
+    def test_a_damaged_file_stops_with_a_plain_message(self):
+        none = os.path.join(self.tmp.name, "none.json")
+        good = os.path.join(self.tmp.name, "good.json")
+        with open(good, "w") as fh:
+            json.dump({"hits": [{"symbol": "KO"}]}, fh)
+        broken = os.path.join(self.tmp.name, "broken.json")
+        with open(broken, "w") as fh:
+            fh.write("{not json")
+        listed = os.path.join(self.tmp.name, "list.json")
+        with open(listed, "w") as fh:
+            json.dump([{"symbol": "KO"}], fh)
+        for flag in ("--daily-watchlist", "--watchlist", "--plan", "--portfolio", "--config", "--state"):
+            for damaged, says in ((broken, "is not valid JSON (line 1, column 2)"), (listed, "is not a JSON object")):
+                files = {"--daily-watchlist": good, "--watchlist": none, "--plan": none, "--portfolio": none,
+                         "--config": none, "--state": self.state}
+                files[flag] = damaged
+                args = ["--offline", DIR, "--now", NOW, "--hours", "24"]
+                for k, v in files.items():
+                    args += [k, v]
+                for extra in ([], ["--tickers", "KO"]):
+                    code, out, err = run(extra + args)
+                    self.assertEqual(code, 2, (flag, damaged, extra, err))
+                    self.assertEqual(out, "", (flag, damaged, extra))
+                    self.assertIn("news: %s %s" % (damaged, says), err)
+                    self.assertIn("Fix or delete it, then run /trader-news again.", err)
+                    self.assertNotIn("Traceback", err)
+                self.assertFalse(os.path.exists(self.state), flag)   # stopped before writing its memory
+        # the same files, all good, still run as before
+        code, out, err = run(["--offline", DIR, "--now", NOW, "--hours", "24", "--daily-watchlist", good,
+                              "--watchlist", none, "--plan", none, "--portfolio", none, "--config", none,
+                              "--state", self.state, "--json", "--dry-run"])
+        self.assertEqual(code, 0, err)
 
     def test_no_tickers_is_an_error(self):
         code, _, err = run(self.base)

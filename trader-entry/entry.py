@@ -7,7 +7,7 @@ moment to get in. Standard library only. Long side only. It never places an orde
     python3 entry.py check TSLA --setup level --level 371.20    # first close above a price
     python3 entry.py check TSLA --interval 1m --min-volume-x 1.5 --write
     python3 entry.py watch TSLA --every 30 --until 15:00  # one line per closed bar
-    python3 entry.py watchlist                            # every hit in trader/watchlist.json
+    python3 entry.py watchlist                            # every hit in today's orb scan, trader/watchlist.json
 
 Setups (v2 plans longs only):
   orb    opening-range breakout. The range is the high and low of the first
@@ -851,6 +851,20 @@ def cmd_watch(a):
     return code
 
 
+def check_watchlist_is_today(doc, path, now_utc):
+    """The watchlist must be today's opening-range scan (scan.py orb), never a daily
+    list or an older day's breakouts: watching yesterday's names against today's bars
+    can say "triggered" on a stock nobody picked today."""
+    mode = doc.get("mode")
+    as_of = str(doc.get("as_of") or "")
+    today = to_ist(now_utc).date().isoformat()
+    if mode != "orb" or as_of[:10] != today:
+        raise EntryError("%s is not today's opening-range scan (it is mode %s, as of %s; today is %s IST). "
+                         "Stopped, nothing was checked. Run /trader-scanner orb first (after 9:35 IST), "
+                         "then try again, or name one stock: entry.py check <TICKER>."
+                         % (path, mode or "unknown", as_of or "unknown", today))
+
+
 def cmd_watchlist(a):
     cfg = read_config(a.config)
     opts = _opts(a, cfg)
@@ -861,6 +875,9 @@ def cmd_watchlist(a):
             doc = json.load(fh)
     except ValueError as e:
         raise EntryError("%s is not valid JSON: %s" % (a.watchlist, e))
+    if not isinstance(doc, dict):
+        raise EntryError("%s is not a scanner watchlist" % a.watchlist)
+    check_watchlist_is_today(doc, a.watchlist, parse_now(a.now) if a.now else utc_now())
     hits = [h for h in (doc.get("hits") or []) if isinstance(h, dict) and h.get("symbol")]
     if not hits:
         raise EntryError("no hits in %s: the scanner found nothing to watch" % a.watchlist)
@@ -931,7 +948,7 @@ def main(argv=None):
     p.add_argument("--every", type=float, default=30, help="seconds between polls while Yahoo is behind")
     p.add_argument("--until", help="stop at this IST (HH:MM)")
     p.add_argument("--out", default="trader/entry.json", help="where a trigger is written")
-    p = sub.add_parser("watchlist", help="check every hit in trader/watchlist.json")
+    p = sub.add_parser("watchlist", help="check every hit in trader/watchlist.json (today's orb scan only)")
     common(p)
     p.add_argument("--watchlist", default="trader/watchlist.json")
     p.add_argument("--json", action="store_true")

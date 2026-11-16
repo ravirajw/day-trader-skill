@@ -4,10 +4,12 @@ description: >-
   Chart Scanner. Scans thousands of charts for setups: opening-range
   breakouts, flags, oversold bounces. Builds the list of US-listed common
   stocks, ordinary shares and ADRs from Nasdaq Trader's symbol directories,
-  runs a pre-market scan of daily closes (20-day closing-high breakout, bull
-  flag, reclaimed the 20-day average, oversold, oversold bounce) and an
-  intraday opening-range breakout scan on 5-minute bars, then writes
-  trader/watchlist.json for trader-news and trader-entry. Free Yahoo data,
+  runs a scan of daily closes, after the close or before the open (20-day
+  closing-high breakout, bull flag, reclaimed the 20-day average, oversold,
+  oversold bounce) and an intraday opening-range breakout scan on 5-minute
+  bars, then writes
+  trader/watchlist-daily.json (daily) and trader/watchlist.json (orb) for
+  trader-news and trader-entry. Free Yahoo data,
   bar by bar. Use when the user says "scan the market", "find me setups",
   "what is breaking out", "opening range breakouts", "scan for bull flags",
   "oversold stocks", "pre-market scan", "build my watchlist", "what should I
@@ -28,11 +30,11 @@ the scanner does not change that. It only saves you from flipping through
 
 ```bash
 python3 "${CLAUDE_SKILL_DIR}/scan.py" universe                       # -> trader/universe.txt
-python3 "${CLAUDE_SKILL_DIR}/scan.py" daily                          # before the open -> trader/watchlist.json
+python3 "${CLAUDE_SKILL_DIR}/scan.py" daily                          # after the close or before the open -> trader/watchlist-daily.json
 python3 "${CLAUDE_SKILL_DIR}/scan.py" daily --symbols TSLA,NVDA,AMD  # or --watchlist FILE, --limit 200
-python3 "${CLAUDE_SKILL_DIR}/scan.py" orb                            # after 9:35 AM IST -> trader/watchlist.json
+python3 "${CLAUDE_SKILL_DIR}/scan.py" orb                            # after 9:35 AM IST: reads watchlist-daily.json -> trader/watchlist.json
 python3 "${CLAUDE_SKILL_DIR}/scan.py" orb --at 10:15                 # cut the clock at 10:15 AM IST
-python3 "${CLAUDE_SKILL_DIR}/scan.py" orb --watchlist trader/watchlist.json --json
+python3 "${CLAUDE_SKILL_DIR}/scan.py" orb --symbols RELIANCE.NS,TCS.NS --json        # or any other list
 ```
 
 Flags: `--min-price 5` and `--min-volume` (daily 1,000,000, orb 0),
@@ -47,8 +49,9 @@ reason is one plain line).
 | file | what |
 | --- | --- |
 | `trader/universe.txt` | written by `universe`: one `SYMBOL\|Name` a line, read by `daily` and `orb` |
-| `trader/watchlist.json` | written by `daily` and `orb`: `mode`, `as_of`, `universe`, `scanned`, `failed`, `hits[]`. trader-news and trader-entry read `hits[].symbol` |
-| `trader/config.json` | `no_entries_after` (default 15:00), read by `orb`; `daily_min_volume` (optional, default 1,000,000 shares): the daily scan's volume floor when no `--min-volume` is given; `watchlist` (optional): a file of tickers that `daily` and `orb` scan when no `--symbols` / `--watchlist` is given, instead of the US universe |
+| `trader/watchlist-daily.json` | written by `daily` (never by `orb`): `mode`, `as_of`, `universe`, `scanned`, `failed`, `hits[]`. `orb` scans its `hits[].symbol` when no `--symbols` / `--watchlist` / `--universe` is given, and stops with a plain line, before fetching anything, if the file is missing or is not the daily scan of the previous NSE trading day's close (`mode` daily, `as_of` that date; weekends and NSE holidays skipped). trader-news reads it too |
+| `trader/watchlist.json` | written by `orb`, the same shape plus each hit's range (`or_high`, `or_low`, `at`, `price`). Re-running `orb` during the morning overwrites only this file, so the daily list is never lost. trader-news and trader-entry read `hits[].symbol` |
+| `trader/config.json` | `no_entries_after` (default 15:00), read by `orb`; `daily_min_volume` (optional, default 1,000,000 shares): the daily scan's volume floor when no `--min-volume` is given; `watchlist` (optional): a file of tickers that `daily` scans when no `--symbols` / `--watchlist` is given, instead of the US universe |
 
 ## The universe
 
@@ -79,7 +82,7 @@ came from an ad hoc filter (names that say common or ordinary, no ADRs). All
 5,259 of those are in this list; the 684 extra are mostly ADRs, closed-end
 funds and partnership units. The Oct 20 files gave 5,942.
 
-## The daily scan (before the open)
+## The daily scan (after the close or before the open)
 
 Yahoo's spark endpoint returns closes for 20 symbols a request, so 5,942
 symbols take 298 requests. On Oct 20 2026 that took 145 seconds with the
@@ -125,8 +128,10 @@ Timing, live on Tue Oct 20 2026 (a strong morning): 100 liquid names at
 10:01 AM took 35 seconds (5 spark requests, 70 v8 charts, 51 of 91 usable
 charts broke out). The whole universe at 10:03 AM took about 4 minutes (298
 spark requests, then 200 v8 charts): 2,448 usable charts, 1,782 candidates,
-the 200 most traded checked, 119 of those broke out. For a fast answer, scan
-the daily watchlist or a list of names you trade (`--watchlist`, `--symbols`).
+the 200 most traded checked, 119 of those broke out. `orb` scans the daily
+list (`trader/watchlist-daily.json`) by default, which is the fast answer. To
+scan the whole universe instead, pass `--universe trader/universe.txt`; for
+names of your own, `--symbols` or `--watchlist`.
 
 A chart is usable only when every 5-minute bar from 9:15 to the cutoff is
 there; a missing bar means a halt or a thin stock. Null closes are dropped,
@@ -148,11 +153,15 @@ early closes.
 ## Steps
 
 1. Once a week or so: `scan.py universe`.
-2. Before the open: `scan.py daily`. Tell the user the counts (fetched,
+2. After the close or before the open: `scan.py daily` (it writes
+   `trader/watchlist-daily.json`). Tell the user the counts (fetched,
    liquid, scanned, hits) and the top few by setup.
-3. After 9:35 AM IST (10:15 is the classic): `scan.py orb`. Tell the user how
-   many usable charts broke their range and when, and that a later hit is
-   closer to the price now.
+3. After 9:35 AM IST (10:15 is the classic): `scan.py orb`. It scans the
+   stocks in `trader/watchlist-daily.json` and stops with a plain line if that
+   file is not the daily scan of the last NSE close (run step 2 first). It
+   writes `trader/watchlist.json`; running it again later only overwrites
+   that file. Tell the user how many usable charts broke their range and when,
+   and that a later hit is closer to the price now.
 4. The user picks one chart. Hand it on: `/trader-news TICKER` (what is moving
    it), then `/trader-entry TICKER` (the entry bar by bar). Never pick for them.
 

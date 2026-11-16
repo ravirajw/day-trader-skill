@@ -11,8 +11,8 @@ stock has moved today and a flag on anything that touches your tickers.
     python3 news.py --no-sec                         # headlines only
     python3 news.py --no-moves                       # skip the price line per ticker
 
-Your tickers, when --tickers is not given: every hit in trader/watchlist.json
-(trader-scanner), the symbol in trader/plan.json (trader-exit) and the
+Your tickers, when --tickers is not given: every hit in trader/watchlist-daily.json
+and trader/watchlist.json (trader-scanner daily and orb), the symbol in trader/plan.json (trader-exit) and the
 positions in trader/portfolio.json.
 
 Sources, one request each per ticker:
@@ -109,22 +109,40 @@ def to_ist(utc):
 
 # ---------------------------------------------------------------- inputs
 
+class BadFileError(Exception):
+    """A file news reads (watchlists, plan, portfolio, config, state) is damaged. Kept apart
+    from NewsError, which per-ticker loops catch and turn into notes: a damaged file must
+    stop the run, not be skipped (skipping portfolio.json could drop a stock you hold)."""
+
+
 def load_json(path):
+    """The file as a JSON object, None when it does not exist. A damaged file (not valid
+    JSON, or not a JSON object) raises BadFileError with a plain message."""
     if path and os.path.isfile(path):
         with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
+            try:
+                doc = json.load(fh)
+            except ValueError as exc:
+                where = " (line %d, column %d)" % (exc.lineno, exc.colno) if hasattr(exc, "lineno") else ""
+                raise BadFileError("%s is not valid JSON%s. Fix or delete it, then run /trader-news again."
+                                   % (path, where))
+        if not isinstance(doc, dict):
+            raise BadFileError("%s is not a JSON object. Fix or delete it, then run /trader-news again." % path)
+        return doc
     return None
 
 
 def watch_from_files(portfolio="trader/portfolio.json", watchlist="trader/watchlist.json",
-                     plan="trader/plan.json"):
-    """{ticker: name or None}: the scanner's hits, the planned trade and your holdings."""
+                     plan="trader/plan.json", daily_watchlist="trader/watchlist-daily.json"):
+    """{ticker: name or None}: the scanner's hits (the daily list and the opening-range
+    breakouts), the planned trade and your holdings."""
     out = {}
-    wl = load_json(watchlist) or {}
-    for h in wl.get("hits", []):
-        sym = h.get("symbol") or h.get("ticker")
-        if sym:
-            out[sym.upper()] = h.get("name")
+    for path in (daily_watchlist, watchlist):
+        wl = load_json(path) or {}
+        for h in wl.get("hits", []):
+            sym = h.get("symbol") or h.get("ticker")
+            if sym:
+                out[sym.upper()] = h.get("name") or out.get(sym.upper())
     pl = load_json(plan) or {}
     if pl.get("symbol"):
         out.setdefault(pl["symbol"].upper(), pl.get("name"))
@@ -475,10 +493,19 @@ def _json_ready(items):
 
 
 def main(argv=None):
+    try:
+        return _main(argv)
+    except BadFileError as exc:
+        print("news: %s" % exc, file=sys.stderr)
+        return 2
+
+
+def _main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--tickers", nargs="*", help="default: watchlist + plan + portfolio")
     ap.add_argument("--portfolio", default="trader/portfolio.json")
-    ap.add_argument("--watchlist", default="trader/watchlist.json")
+    ap.add_argument("--watchlist", default="trader/watchlist.json", help="the opening-range hits (scan.py orb)")
+    ap.add_argument("--daily-watchlist", default="trader/watchlist-daily.json", help="the daily hits (scan.py daily)")
     ap.add_argument("--plan", default="trader/plan.json")
     ap.add_argument("--state", default="trader/state/news.json")
     ap.add_argument("--hours", type=float, default=48, help="ignore items older than this")
@@ -497,13 +524,13 @@ def main(argv=None):
 
     if args.tickers:
         watch = {t.upper(): None for t in args.tickers}
-        known = watch_from_files(args.portfolio, args.watchlist, args.plan)
+        known = watch_from_files(args.portfolio, args.watchlist, args.plan, args.daily_watchlist)
         watch.update({t: known[t] for t in watch if known.get(t)})
     else:
-        watch = watch_from_files(args.portfolio, args.watchlist, args.plan)
+        watch = watch_from_files(args.portfolio, args.watchlist, args.plan, args.daily_watchlist)
     if not watch:
         print("news: no tickers. Pass --tickers, or run /trader-scanner first (it writes "
-              "trader/watchlist.json).", file=sys.stderr)
+              "trader/watchlist-daily.json and trader/watchlist.json).", file=sys.stderr)
         return 2
     now = parse_time(args.now) if args.now else _dt.datetime.now(_dt.timezone.utc)
     state = load_json(args.state) or {}

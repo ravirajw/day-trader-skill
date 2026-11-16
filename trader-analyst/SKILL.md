@@ -71,7 +71,8 @@ email. It refuses to call SEC without one.
 ## Steps
 
 1. Run it for the companies in question (or the tickers on
-   `trader/watchlist.json`):
+   `trader/watchlist-daily.json`, the daily setups, and `trader/watchlist.json`,
+   today's opening-range breakouts):
 
    ```bash
    python3 "${CLAUDE_SKILL_DIR}/facts.py" TSLA

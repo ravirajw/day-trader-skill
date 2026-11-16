@@ -127,8 +127,8 @@ polite about it.
 
 ```bash
 python3 trader-scanner/scan.py universe                                # ~5,900 US stocks, Nasdaq Trader
-python3 trader-scanner/scan.py daily                                   # pre-market setups, whole universe
-python3 trader-scanner/scan.py orb --at 10:15                          # opening-range breakouts so far
+python3 trader-scanner/scan.py daily                                   # after the close or before the open -> trader/watchlist-daily.json
+python3 trader-scanner/scan.py orb --at 10:15                          # breakouts in the daily list so far -> trader/watchlist.json
 python3 trader-news/news.py --tickers TSLA --hours 12                  # headlines, 8-Ks, today's move
 python3 trader-entry/entry.py check TSLA --setup orb                   # waiting / triggered / expired
 python3 trader-entry/entry.py watch TSLA --every 30                    # bar by bar until it triggers
