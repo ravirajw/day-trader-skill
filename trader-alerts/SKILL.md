@@ -4,13 +4,12 @@ description: >-
   Price Alerts. Rings when a price, a stop or the opening bell hits. Turns
   the trade plan into three alerts in one go (the stop, the target and "flat
   by close" at your flat-by time), plus above / below / stop / target levels,
-  percent moves from the previous close, any time of day, and the NYSE
-  opening bell, each ringing once so you are not spammed. Knows NYSE hours
-  with the 2026 and 2027 holidays and 1:00 p.m. early closes, works out New
-  York time itself, fetches free delayed quotes (Yahoo chart JSON, Stooq
+  percent moves from the previous close, any time of day, and the NSE
+  opening bell, each ringing once so you are not spammed. Knows NSE hours
+  with the 2026 holidays, works out India time (IST) itself, fetches free delayed quotes (Yahoo chart JSON, Stooq
   CSV) one ticker at a time, and writes trader/prices.json for sizing and the
   risk check. Use when the user says "alert me when", "tell me if TSLA hits",
-  "watch my stop", "watch my trade", "remind me to close by 3:55", "is the
+  "watch my stop", "watch my trade", "remind me to close by 3:15", "is the
   market open", "when does the market open", "get me a price", or right
   after /trader-exit writes a plan.
 argument-hint: "[ticker] [price]"
@@ -27,12 +26,12 @@ user what happened and when it is time to be flat.
 `${CLAUDE_SKILL_DIR}` below is this skill's folder (where this SKILL.md lives).
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/alerts.py" clock                          # NYSE open or closed, next open
+python3 "${CLAUDE_SKILL_DIR}/alerts.py" clock                          # NSE open or closed, next open
 python3 "${CLAUDE_SKILL_DIR}/alerts.py" add --from-plan                # stop, target, flat by close from trader/plan.json
 python3 "${CLAUDE_SKILL_DIR}/alerts.py" add --opening-bell
 python3 "${CLAUDE_SKILL_DIR}/alerts.py" add --symbol TSLA --stop 358.32
 python3 "${CLAUDE_SKILL_DIR}/alerts.py" add --symbol TSLA --target 370.04
-python3 "${CLAUDE_SKILL_DIR}/alerts.py" add --at 15:55 --label "flat by close" --before-close
+python3 "${CLAUDE_SKILL_DIR}/alerts.py" add --at 15:15 --label "flat by close" --before-close
 python3 "${CLAUDE_SKILL_DIR}/alerts.py" add --symbol KO --pct 3
 python3 "${CLAUDE_SKILL_DIR}/alerts.py" check                          # exit 0 = something rang
 python3 "${CLAUDE_SKILL_DIR}/alerts.py" quote TSLA --write             # -> trader/prices.json
@@ -41,7 +40,7 @@ python3 "${CLAUDE_SKILL_DIR}/alerts.py" list
 python3 "${CLAUDE_SKILL_DIR}/alerts.py" reset tsla-plan-stop
 ```
 
-`--now "2026-10-19 15:55"` pins the clock (New York time); `--offline DIR`
+`--now "2026-10-19 15:15"` pins the clock (IST); `--offline DIR`
 reads saved quote files instead of the network.
 
 ## What it reads and writes
@@ -61,13 +60,13 @@ reads saved quote files instead of the network.
 | `above` / `target` | price at or above `price` | after `reset`, or on its own if `"rearm": true` and the price fell back |
 | `below` / `stop` | price at or below `price` | same |
 | `pct_move` | moved `pct` percent from the previous close (or `ref`), optional `direction` up or down | once per day at most |
-| `time` | the New York clock passed `at` ("15:55") on a trading day | once per trading day |
-| `opening_bell` | the NYSE is open | once per trading day |
+| `time` | the IST clock passed `at` ("15:15") on a trading day | once per trading day |
+| `opening_bell` | the NSE is open | once per trading day |
 
-A rule with `"date"` is watched on that New York date only; `--from-plan`
+A rule with `"date"` is watched on that IST date only; `--from-plan`
 rules carry the plan's date, so yesterday's stop never rings today. A `time`
-rule with `"before_close": true` moves 3 hours earlier on a 1:00 p.m. early
-close, so "flat by close" at 15:55 rings at 12:55 on those days.
+rule with `"before_close": true` would move 3 hours earlier on an early
+close; NSE has none scheduled, so it rings at its own time.
 
 ## Quotes
 
@@ -85,20 +84,18 @@ close, so "flat by close" at 15:55 rings at 12:55 on those days.
   `get_stock_snapshot`, IBKR `get_price_snapshot`) and write it into
   `trader/prices.json` as `{"as_of": "...Z", "prices": {"TSLA": 366.48}}`.
 
-## The NYSE clock
+## The NSE clock
 
-Regular session 9:30 a.m. to 4:00 p.m. New York time, closed on weekends and
-on these holidays, from nyse.com/markets/hours-calendars (read 2026-10-13):
+Regular session 9:15 a.m. to 3:30 p.m. IST, closed on weekends and
+on these holidays, from nseindia.com (circulars NSE/CMTR/71775 and 72260), read 2026-11-16:
 
-- 2026: Jan 1, Jan 19, Feb 16, Apr 3 (Good Friday), May 25, Jun 19, Jul 3
-  (Independence Day observed), Sep 7, Nov 26, Dec 25. Early close 1:00 p.m. on
-  Nov 27 and Dec 24.
-- 2027: Jan 1, Jan 18, Feb 15, Mar 26 (Good Friday), May 31, Jun 18
-  (Juneteenth observed), Jul 5 (Independence Day observed), Sep 6, Nov 25,
-  Dec 24 (Christmas observed). Early close 1:00 p.m. on Nov 26.
+- 2026: Jan 15 (Municipal Corporation Election in Maharashtra), Jan 26,
+  Mar 3, Mar 26, Mar 31, Apr 3 (Good Friday), Apr 14, May 1, May 28, Jun 26,
+  Sep 14, Oct 2, Oct 20, Nov 10, Nov 24, Dec 25. No scheduled early closes.
+- 2027: not published by NSE yet.
 
-Daylight saving time is worked out in the tool, so it needs no time zone
-files and ignores the computer's own zone. For any other year it says the
+IST is UTC+5:30 all year (no daylight saving), so the tool needs no time
+zone files and ignores the computer's own zone. For any other year it says the
 holiday list is unknown.
 
 ## Steps
@@ -116,6 +113,8 @@ holiday list is unknown.
    for them.
 
 ## Example: the reel
+
+_This example is the original US recording (TSLA on the NYSE, New York time, US dollars). On NSE the same steps run on IST (9:15 to 15:30, flat by 15:15), and prices for .NS symbols show in rupees._
 
 TSLA on Monday 2026-10-19: entry 364.18 at 10:15 AM, stop 358.32, target
 370.04, flat by 15:55. `add --from-plan` writes `tsla-plan-stop`,
