@@ -92,6 +92,7 @@ BAR_MIN = 5
 MAX_CONFIRM = 200   # stage-2 v8 charts per orb scan, most traded first
 MIN_DAILY_BARS = 30
 DEFAULT_UNIVERSE = "trader/universe.txt"
+DAILY_MIN_VOLUME = 1000000  # shares a day, for daily when neither --min-volume nor config sets it
 NOTE = "A scan is a list of charts that match a rule, not a list of stocks to buy."
 
 NSE_HOLIDAYS = {  # NSE circular NSE/CMTR/71775 (12 Dec 2025) + NSE/CMTR/72260 (12 Jan 2026)
@@ -872,6 +873,9 @@ def cmd_universe(a):
 
 def cmd_daily(a):
     t0 = time.time()
+    if a.min_volume is None:
+        mv = read_config(a.config).get("daily_min_volume")
+        a.min_volume = int(mv) if mv is not None else DAILY_MIN_VOLUME
     now = parse_now(a.now)
     offline_syms = None
     if a.offline:
@@ -1051,6 +1055,7 @@ def main(argv=None):
 
     p = sub.add_parser("daily", help="pre-market setups from daily closes")
     common(p, 5.0, 1000000)
+    p.set_defaults(min_volume=None)  # then config "daily_min_volume", else 1,000,000
     p = sub.add_parser("orb", help="opening-range breakouts so far today")
     common(p, 5.0, 0)
     p.add_argument("--or-minutes", type=int, default=15)

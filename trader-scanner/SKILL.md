@@ -48,7 +48,7 @@ reason is one plain line).
 | --- | --- |
 | `trader/universe.txt` | written by `universe`: one `SYMBOL\|Name` a line, read by `daily` and `orb` |
 | `trader/watchlist.json` | written by `daily` and `orb`: `mode`, `as_of`, `universe`, `scanned`, `failed`, `hits[]`. trader-news and trader-entry read `hits[].symbol` |
-| `trader/config.json` | `no_entries_after` (default 15:00), read by `orb`; `watchlist` (optional): a file of tickers that `daily` and `orb` scan when no `--symbols` / `--watchlist` is given, instead of the US universe |
+| `trader/config.json` | `no_entries_after` (default 15:00), read by `orb`; `daily_min_volume` (optional, default 1,000,000 shares): the daily scan's volume floor when no `--min-volume` is given; `watchlist` (optional): a file of tickers that `daily` and `orb` scan when no `--symbols` / `--watchlist` is given, instead of the US universe |
 
 ## The universe
 

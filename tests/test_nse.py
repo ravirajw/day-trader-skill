@@ -329,6 +329,31 @@ class ScannerWatchlistDefault(unittest.TestCase):
         self.assertEqual(scan.read_symbols(self.args()), ["RELIANCE.NS", "TCS.NS", "M&M.NS"])
         self.assertEqual(scan.read_symbols(self.args(symbols="INFY.NS")), ["INFY.NS"])  # an explicit list still wins
 
+    def test_daily_volume_floor_comes_from_config_unless_typed(self):
+        seen = []
+        real = scan.scan_daily
+
+        def spy(data, symbols, now_utc, min_price, min_volume):
+            seen.append(min_volume)
+            raise scan.ScanError("stop here")
+        scan.scan_daily = spy
+        self.addCleanup(setattr, scan, "scan_daily", real)
+        offline = os.path.join(FIX, "trader-scanner", "daily-spark-2026-10-19.json")
+
+        def run(cfg, *extra):
+            with open(os.path.join("trader", "config.json"), "w") as fh:
+                json.dump(cfg, fh)
+            import contextlib
+            import io
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                scan.main(["daily", "--offline", offline, "--now", "2026-10-19 09:00", "--no-write"] + list(extra))
+            return seen[-1]
+
+        self.assertEqual(run({}), 1000000)                                         # the original default
+        self.assertEqual(run({"daily_min_volume": 100000}), 100000)                # your config
+        self.assertEqual(run({"daily_min_volume": 100000}, "--min-volume", "5"), 5)  # typed beats config
+        self.assertEqual(run({"daily_min_volume": 0}), 0)                          # 0 means no volume filter
+
     def test_without_it_the_us_universe_is_still_the_default(self):
         with self.assertRaises(scan.ScanError) as e:
             scan.read_symbols(self.args())
