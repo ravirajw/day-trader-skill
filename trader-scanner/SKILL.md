@@ -9,12 +9,17 @@ description: >-
   oversold bounce) and an intraday opening-range breakout scan on 5-minute
   bars, then writes
   trader/watchlist-daily.json (daily) and trader/watchlist.json (orb) for
-  trader-news and trader-entry. Free Yahoo data,
+  trader-news and trader-entry. A loop (loop.py) re-checks the daily list
+  one minute after every 5-minute bar, 9:36 to 10:56 AM IST, and puts every
+  breakout into a sorted Excel sheet (trader/orb-YYYY-MM-DD.xlsx) with entry,
+  stop, target, quantity and the Time Machine's odds. Free Yahoo data,
   bar by bar. Use when the user says "scan the market", "find me setups",
   "what is breaking out", "opening range breakouts", "scan for bull flags",
   "oversold stocks", "pre-market scan", "build my watchlist", "what should I
-  look at today", or at the start of a trading day before /trader-news.
-argument-hint: "[universe | daily | orb] [--at HH:MM]"
+  look at today", "watch for breakouts all morning", "run the loop", "build
+  the breakout sheet", or at the start of a trading day before
+  /trader-news.
+argument-hint: "[universe | daily | orb | loop] [--at HH:MM]"
 ---
 
 # trader-scanner
@@ -35,6 +40,9 @@ python3 "${CLAUDE_SKILL_DIR}/scan.py" daily --symbols TSLA,NVDA,AMD  # or --watc
 python3 "${CLAUDE_SKILL_DIR}/scan.py" orb                            # after 9:35 AM IST: reads watchlist-daily.json -> trader/watchlist.json
 python3 "${CLAUDE_SKILL_DIR}/scan.py" orb --at 10:15                 # cut the clock at 10:15 AM IST
 python3 "${CLAUDE_SKILL_DIR}/scan.py" orb --symbols RELIANCE.NS,TCS.NS --json        # or any other list
+python3 "${CLAUDE_SKILL_DIR}/loop.py" run                            # 9:36 to 10:56 AM: every breakout -> trader/orb-YYYY-MM-DD.xlsx
+python3 "${CLAUDE_SKILL_DIR}/loop.py" stop                           # from another terminal: stop the loop
+python3 "${CLAUDE_SKILL_DIR}/loop.py" show                           # today's sheet, sorted, in the terminal
 ```
 
 Flags: `--min-price 5` and `--min-volume` (daily 1,000,000, orb 0),
@@ -141,6 +149,55 @@ weekend or holiday, after the close, or after `no_entries_after` (an expired
 setup) it prints one plain line and writes nothing. NSE has no scheduled
 early closes.
 
+## The loop (loop.py): every breakout into a sorted Excel sheet
+
+`loop.py run` checks the stocks in `trader/watchlist-daily.json` one minute
+after each 5-minute bar closes: 9:36, 9:41, ... 10:56 AM IST (`--last-run` to
+change the last one). Start it any time before then; it waits. A breakout is
+the first completed bar to CLOSE above the opening-range high, the same rule as
+`orb`. Every stock that broke out moves to the sheet once and is not checked
+again that day, so at 9:41 only the ones still waiting are checked. It ends
+after the 10:56 run, or sooner when every stock has broken out.
+
+Each row:
+
+| column | how |
+| --- | --- |
+| Entry | the breakout bar's close |
+| Stop | the opening-range midpoint, (range high + range low) / 2, rounded down |
+| Target | entry + `max_reward_risk` x (entry - stop), from the config (2 gives a 2R target) |
+| Qty | the smaller of `max_loss_per_trade_usd` / (entry - stop) and `max_order_usd` / entry, rounded down; "Qty limited by" says which |
+| Max loss, Cost | qty x (entry - stop), qty x entry |
+| Target first, Stop first, Neither, Verdict | the Time Machine: 10,000 replays to `flat_by`, run for a run's new breakouts in parallel (4 at a time, `--workers`) |
+
+Nothing is filtered out. After every run the whole sheet is re-sorted:
+"Strongly toward the target" on top, then "Leans toward the target",
+break-even, toward the stop, and rows whose Time Machine failed (Yahoo error,
+too little history) at the bottom with the reason. A failure is not retried.
+Within one verdict the clearer lean ranks higher, then the earlier breakout.
+"Breakout time" is the bar that broke out; "Found at" is the run that saw it
+(later when Yahoo was slow to post a bar).
+
+- **The sheet** is a real `.xlsx` written with plain Python (no install),
+  `trader/orb-YYYY-MM-DD.xlsx`, one a day, rewritten after each run. Excel does
+  not reload an open file: close and reopen it to see the latest run.
+- **The daily list is never changed.** Which stocks have moved to the sheet is
+  kept in `trader/loop.json`, so a restart the same day carries on without
+  adding a stock twice.
+- **Nothing is placed and nothing is capped by count.** Choosing rows and
+  placing orders is the user's job; each row is sized on its own, so the costs
+  of several rows can add up past the cash.
+- **Stopping:** Ctrl+C, or `loop.py stop` from another terminal (it writes
+  `trader/loop.stop`).
+- **Awake:** on a Mac it runs `caffeinate` while it works (`--no-caffeinate`
+  to skip). Closing the lid still sleeps most Macs.
+- **Replay a past day:** `loop.py run --offline wall5m.json.gz --tm-offline
+  FOLDER --now "2026-10-19 09:30" --symbols TSLA` runs the morning on a
+  simulated clock (`FOLDER` holds `<SYM>-60d5m.json`). On the reel's session
+  on the NSE clock, TSLA breaks out on the 10:00 bar: entry 364.18, stop
+  358.32, target 375.90 at 2R, and the Time Machine says "Strongly toward the
+  stop".
+
 ## Data and limits
 
 - Yahoo's chart and spark endpoints are free, unofficial and can lag. Bars are
@@ -162,7 +219,10 @@ early closes.
    writes `trader/watchlist.json`; running it again later only overwrites
    that file. Tell the user how many usable charts broke their range and when,
    and that a later hit is closer to the price now.
-4. The user picks one chart. Hand it on: `/trader-news TICKER` (what is moving
+4. Or, for the whole morning: `loop.py run` (above). Tell the user where the
+   sheet is, that it is re-sorted after every run, and that they choose and
+   place the orders themselves.
+5. The user picks one chart. Hand it on: `/trader-news TICKER` (what is moving
    it), then `/trader-entry TICKER` (the entry bar by bar). Never pick for them.
 
 ## Example: the reel
