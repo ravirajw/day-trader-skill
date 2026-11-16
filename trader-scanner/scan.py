@@ -761,6 +761,8 @@ def read_symbols(a, offline_syms=None):
         syms = symbols_from_file(a.watchlist)
     elif offline_syms is not None and not a.universe:
         syms = sorted(offline_syms)  # offline: every chart in the file, unless a list was given
+    elif not a.universe and read_config(getattr(a, "config", None)).get("watchlist"):
+        syms = symbols_from_file(read_config(a.config)["watchlist"])  # your own list beats the US universe
     else:
         path = a.universe or DEFAULT_UNIVERSE
         if not os.path.exists(path):
@@ -1040,6 +1042,8 @@ def main(argv=None):
         p.add_argument("--show", type=int, default=50, help="hits to print (all are written)")
         p.add_argument("--quiet", action="store_true")
         p.add_argument("--json", action="store_true")
+        p.add_argument("--config", default="trader/config.json",
+                       help="no_entries_after, and \"watchlist\": a file of tickers used when no list is given")
 
     p = sub.add_parser("daily", help="pre-market setups from daily closes")
     common(p, 5.0, 1000000)
@@ -1050,7 +1054,6 @@ def main(argv=None):
                    help="v8 charts to fetch in stage 2, most traded first (%d; 0 = all)" % MAX_CONFIRM)
     p.add_argument("--at", help="cut the clock at this IST, HH:MM")
     p.add_argument("--until", help="no new entries after HH:MM (default: config no_entries_after, 15:00)")
-    p.add_argument("--config", default="trader/config.json")
     a = ap.parse_args(argv)
     if not a.cmd:
         ap.print_help()

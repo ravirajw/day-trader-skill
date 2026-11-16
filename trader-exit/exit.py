@@ -31,8 +31,8 @@ plans longs only).
 
 flat_by (default 15:15, or "flat_by" in trader/config.json): out by then, win
 or lose. NSE has no scheduled early closes.
-"min_reward_risk" in the config (default 1.0) only warns here; trader-risk
-enforces it.
+"min_reward_risk" in the config (default 1.0) and "max_reward_risk" (if set)
+only warn here; trader-risk enforces them.
 
 A stop is a plan, not a guarantee: a gap or a fast market can fill past it.
 Exit codes: plan 0 = a plan, 1 = refused or an error. show 0 = a plan exists.
@@ -610,6 +610,13 @@ def build_plan(a, now_utc):
         if mrr is not None and c["reward_risk"] < D(mrr):
             warnings.append("Reward:risk %s is under your min_reward_risk %s in the config: trader-risk checks that."
                             % (ratio(c["reward_risk"]), num(D(mrr))))
+    except PlanError:
+        pass
+    xrr = cfg.get("max_reward_risk")
+    try:
+        if xrr is not None and c["reward_risk"] > D(xrr):
+            warnings.append("Reward:risk %s is over your max_reward_risk %s in the config: trader-risk checks that."
+                            % (ratio(c["reward_risk"]), num(D(xrr))))
     except PlanError:
         pass
     today = to_ist(now_utc).date()

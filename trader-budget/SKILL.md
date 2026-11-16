@@ -58,7 +58,7 @@ If `trader/config.json` does not exist, copy `config.example.json` into
 - **max_position_pct**, **max_order_usd**, **min_order_usd**: the biggest position (75% of the
   budget), the biggest order ($4,000) and the smallest order ($5).
 - The day limits trader-risk enforces: **max_daily_loss_usd** (150), **max_trades_per_day** (3),
-  **min_reward_risk** (1.0), **require_stop** (true), **no_entries_before** / **no_entries_after**
+  **min_reward_risk** (1.0), **max_reward_risk** (optional, off by default), **require_stop** (true), **no_entries_before** / **no_entries_after**
   ("09:30" / "15:00") and **flat_by** ("15:15"), all IST.
 - **blocked**: tickers they never want to trade.
 - Keep **paper** true until they have watched it work on a paper account.
@@ -85,7 +85,7 @@ minutes old) and higher. A price that ran up since the plan means a bigger
 loss at the same stop, so fewer shares. A lower price never shrinks the risk.
 
 It refuses, and writes no order, when: the size is zero shares, the order is
-under the minimum, reward:risk is under `min_reward_risk`, the stop is not
+under the minimum, reward:risk is under `min_reward_risk` or over `max_reward_risk` (if set), the stop is not
 below the entry, the target is not above it (the move already happened), the
 plan is for another day, the ticker is blocked, or the plan is a short. Say
 the reason to the user in one line.

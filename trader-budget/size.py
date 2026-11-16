@@ -27,7 +27,8 @@ plan's entry, or the price in trader/prices.json if that is fresh (under 15
 minutes old) and higher, because a price that ran up since the plan means a
 bigger loss at the same stop. Zero shares (the stop is too far away for your
 max loss) is a plain refusal: no order is written. So is a reward:risk under
-min_reward_risk (the price ran toward the target since the plan).
+min_reward_risk (the price ran toward the target since the plan), or over
+max_reward_risk when that is set.
 
 Weights mode (kept from v1, no longer the headline): split a budget across a
 list of stocks by weight.
@@ -399,6 +400,10 @@ def size_trade(plan, cfg, budget=None, limit=None, price=None, cash=None, today=
         refusal = ("reward:risk %.2f (target %s, entry %s, stop %s) is under your minimum %s, so trader-risk "
                    "would block it. No order. Skip it, or make a new plan with trader-exit."
                    % (reward_c / float(risk_c), _price(target), _price(ref), _price(stop), _num(c["min_reward_risk"])))
+    elif _f(c.get("max_reward_risk")) and reward_c > _f(c["max_reward_risk"]) * risk_c + EPS:
+        refusal = ("reward:risk %.2f (target %s, entry %s, stop %s) is over your maximum %s, so trader-risk "
+                   "would block it. No order. Make a new plan with a nearer target in trader-exit."
+                   % (reward_c / float(risk_c), _price(target), _price(ref), _price(stop), _num(c["max_reward_risk"])))
     elif cost < float(c.get("min_order_usd") or 0) - 0.005:
         refusal = ("%d share%s of %s is %s, under your %s minimum order. No order."
                    % (qty, "" if qty == 1 else "s", sym, money(cost), money(c["min_order_usd"])))

@@ -43,7 +43,8 @@ What blocks an entry (on top):
                 the limit price for a limit order, else the HIGHER of the plan's
                 entry and a fresh price (under 15 minutes old), so a stale plan
                 cannot understate the risk
-  reward:risk   (target - entry) / (entry - stop) under min_reward_risk
+  reward:risk   (target - entry) / (entry - stop) under min_reward_risk, or
+                over max_reward_risk when that is set
   daily loss    the max losses at the stops of today's entries plus this one
                 over max_daily_loss_usd (win or lose, each counts in full)
   trades        max_trades_per_day entries already placed today
@@ -592,6 +593,7 @@ def check(orders, cfg, portfolio=None, prices=None, state=None, today=None, now=
                         later.append("loss: %s shares x %s risk a share = %s at the stop, over your %s max loss "
                                      "per trade" % (_num(shares), _p(risk_ps), money(max_loss), money(cap)))
                     min_rr = _f(c.get("min_reward_risk"))
+                    max_rr = _f(c.get("max_reward_risk"))
                     if target:
                         if (long and target <= ref + CENT) or (not long and target >= ref - CENT):
                             later.append("target: the target %s must be %s the entry %s"
@@ -601,6 +603,9 @@ def check(orders, cfg, portfolio=None, prices=None, state=None, today=None, now=
                             if min_rr and rr < min_rr - 1e-9:
                                 later.append("reward:risk: %.2f (target %s, entry %s, stop %s) is under your "
                                              "minimum %s" % (rr, _p(target), _p(ref), _p(stop), _num(min_rr)))
+                            if max_rr and rr > max_rr + 1e-9:
+                                later.append("reward:risk: %.2f (target %s, entry %s, stop %s) is over your "
+                                             "maximum %s" % (rr, _p(target), _p(ref), _p(stop), _num(max_rr)))
                     elif min_rr:
                         later.append("reward:risk: no target to measure it against (min_reward_risk %s)"
                                      % _num(min_rr))
@@ -628,7 +633,8 @@ def check(orders, cfg, portfolio=None, prices=None, state=None, today=None, now=
                             % (money(max_loss), (" (limit %s)" % money(c["max_loss_per_trade_usd"]))
                                if _f(c.get("max_loss_per_trade_usd")) else "",
                                ("%.2f" % rr) if rr is not None else "n/a",
-                               (" (min %s)" % _num(c["min_reward_risk"])) if _f(c.get("min_reward_risk")) else ""))
+                               (" (min %s)" % _num(c["min_reward_risk"])) if _f(c.get("min_reward_risk")) else "")
+                            + ((" (max %s)" % _num(c["max_reward_risk"])) if _f(c.get("max_reward_risk")) else ""))
             if daily or cap_t:
                 info.append("today before this: %d of %s trades, %s of %s daily loss"
                             % (len(entries_today) + batch_entries, cap_t or "unlimited",

@@ -251,5 +251,83 @@ class ReviewFixes(unittest.TestCase):
             self.assertFalse(risk.TICKER.match(junk), junk)
 
 
+class RewardRiskRange(unittest.TestCase):
+    """min_reward_risk 0.9 and max_reward_risk 3.1: entry 1520, stop 1510 (risk 10 a share)."""
+    CFG = {"min_reward_risk": 0.9, "max_reward_risk": 3.1, "max_loss_per_trade_usd": 1000, "budget": 100000,
+           "max_order_usd": 30000, "max_position_pct": 30, "cash_buffer_pct": 10}
+
+    def order(self, target):
+        return {"symbol": "RELIANCE.NS", "side": "buy", "qty": "10", "type": "market", "time_in_force": "day",
+                "order_class": "bracket", "take_profit_limit_price": "%.2f" % target, "stop_loss_stop_price": "1510.00",
+                "plan": {"entry": 1520.0, "stop": 1510.0, "target": target, "risk_per_share": 10.0}}
+
+    def verdict(self, target):
+        cfg = dict(risk.DEFAULTS, **self.CFG)
+        res = risk.check([self.order(target)], cfg, prices={"RELIANCE.NS": 1520.0},
+                         now=risk.parse_now("2026-11-16 10:30"), price_times={"RELIANCE.NS": DT(2026, 11, 16, 4, 59)})
+        return res["results"][0]
+
+    def test_risk_passes_inside_the_range_and_at_both_ends(self):
+        for target in (1529.0, 1540.0, 1551.0):  # 0.9R, 2R, 3.1R
+            r = self.verdict(target)
+            self.assertEqual(r["verdict"], "PASS", (target, r["reasons"]))
+
+    def test_risk_blocks_outside_the_range(self):
+        low, high = self.verdict(1528.9), self.verdict(1551.1)  # 0.89R, 3.11R
+        self.assertEqual((low["verdict"], high["verdict"]), ("BLOCK", "BLOCK"))
+        self.assertIn("is under your minimum 0.9", " ".join(low["reasons"]))
+        self.assertIn("is over your maximum 3.1", " ".join(high["reasons"]))
+
+    def test_budget_refuses_over_the_maximum(self):
+        plan = {"symbol": "RELIANCE.NS", "side": "buy", "setup": "orb", "date": "2026-11-16",
+                "entry": 1520.0, "stop": 1510.0, "target": 1560.0, "flat_by": "15:15"}
+        s = budget.size_trade(plan, dict(budget.DEFAULTS, **self.CFG))
+        self.assertIsNone(budget.bracket_order(s))
+        self.assertIn("is over your maximum 3.1", s["refusal"])
+        ok = budget.size_trade(dict(plan, target=1540.0), dict(budget.DEFAULTS, **self.CFG))
+        self.assertIsNone(ok["refusal"])
+        self.assertEqual(ok["qty"], 19)  # 30% of 100,000 = 30,000 / 1,520 = 19 shares
+
+    def test_no_maximum_unless_it_is_set(self):
+        cfg = dict(risk.DEFAULTS, **self.CFG)
+        del cfg["max_reward_risk"]
+        res = risk.check([self.order(1580.0)], cfg, prices={"RELIANCE.NS": 1520.0},  # 6R
+                         now=risk.parse_now("2026-11-16 10:30"), price_times={"RELIANCE.NS": DT(2026, 11, 16, 4, 59)})
+        self.assertEqual(res["results"][0]["verdict"], "PASS")
+
+
+class ScannerWatchlistDefault(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.old = os.getcwd()
+        self.tmp = tempfile.mkdtemp()
+        os.chdir(self.tmp)
+        os.makedirs("trader")
+        with open("nifty50.txt", "w") as fh:
+            fh.write("RELIANCE.NS\nTCS.NS\nM&M.NS\n")
+
+    def tearDown(self):
+        import shutil
+        os.chdir(self.old)
+        shutil.rmtree(self.tmp)
+
+    def args(self, **kw):
+        import argparse
+        base = dict(symbols=None, watchlist=None, universe=None, limit=None, config="trader/config.json")
+        base.update(kw)
+        return argparse.Namespace(**base)
+
+    def test_config_watchlist_is_the_default_list(self):
+        with open(os.path.join("trader", "config.json"), "w") as fh:
+            json.dump({"watchlist": "nifty50.txt"}, fh)
+        self.assertEqual(scan.read_symbols(self.args()), ["RELIANCE.NS", "TCS.NS", "M&M.NS"])
+        self.assertEqual(scan.read_symbols(self.args(symbols="INFY.NS")), ["INFY.NS"])  # an explicit list still wins
+
+    def test_without_it_the_us_universe_is_still_the_default(self):
+        with self.assertRaises(scan.ScanError) as e:
+            scan.read_symbols(self.args())
+        self.assertIn("trader/universe.txt", str(e.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
