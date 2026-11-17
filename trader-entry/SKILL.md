@@ -31,7 +31,7 @@ python3 "${CLAUDE_SKILL_DIR}/entry.py" check TSLA                  # 15-minute o
 python3 "${CLAUDE_SKILL_DIR}/entry.py" check TSLA --write          # also save trader/entry.json
 python3 "${CLAUDE_SKILL_DIR}/entry.py" check TSLA --setup level --level 371.20
 python3 "${CLAUDE_SKILL_DIR}/entry.py" check TSLA --interval 1m --min-volume-x 1.5
-python3 "${CLAUDE_SKILL_DIR}/entry.py" watch TSLA --until 15:00    # one line per closed bar, stops on the trigger
+python3 "${CLAUDE_SKILL_DIR}/entry.py" watch TSLA --until 11:00    # one line per closed bar, stops on the trigger
 python3 "${CLAUDE_SKILL_DIR}/entry.py" watchlist                   # every hit in today's orb scan, trader/watchlist.json
 ```
 
@@ -46,7 +46,7 @@ day bar by bar without waiting.
 | file | what |
 | --- | --- |
 | `trader/watchlist.json` | the scanner's opening-range hits (`hits[].symbol`), for `watchlist`. It must be today's `scan.py orb` output (`mode` orb, `as_of` today in IST): anything else, a daily list or an older day's breakouts, stops with a plain line and nothing is checked |
-| `trader/config.json` | `no_entries_before` (09:30) and `no_entries_after` (15:00), IST. Optional |
+| `trader/config.json` | `no_entries_before` (09:30) and `no_entries_after` (11:00), IST. Optional |
 | Yahoo chart API | today's bars, `range=1d&interval=5m` (or `1m`): free, unofficial, can lag |
 | `trader/entry.json` | with `check --write`, or when `watch` triggers: symbol, setup, status, time, bar, price, level, opening range |
 
@@ -67,7 +67,7 @@ day bar by bar without waiting.
 - **Volume, if you want it.** `--min-volume-x 1.5` also needs the trigger
   bar's volume at 1.5 times the range bars' average. The 9:15 bar holds the
   opening auction, so 1.0 is already strict.
-- **Time limits.** No entries before 9:30 or after 15:00 (config). NSE has
+- **Time limits.** No entries before 9:30 or after 11:00 (config). NSE has
   no scheduled early closes.
 - **What it says.** Waiting (and how far the last close is from the level),
   triggered, expired, or no data. Before 9:15: not open yet. Before 9:30: the
@@ -79,7 +79,7 @@ day bar by bar without waiting.
    today's `/trader-scanner orb` (it refuses any other file). Check `/trader-news` for it first.
 2. Run `entry.py check SYMBOL`. Tell the user the status in one line:
    waiting and how far, triggered at what time and price, or expired.
-3. To wait for it, Claude can run `entry.py watch SYMBOL --until 15:00` in
+3. To wait for it, Claude can run `entry.py watch SYMBOL --until 11:00` in
    the background, or `entry.py check SYMBOL --write` on a `/loop` every 5
    minutes. `watch` wakes just after each bar closes, prints one line per
    bar, and exits 0 on the trigger (it writes `trader/entry.json`) or 1 when
@@ -93,7 +93,7 @@ day bar by bar without waiting.
 
 ## Example: the reel
 
-_This example is the original US recording (TSLA on the NYSE, New York time, US dollars). On NSE the same steps run on IST (9:15 to 15:30, flat by 15:15), and prices for .NS symbols show in rupees._
+_This example is the original US recording (TSLA on the NYSE, New York time, US dollars). On NSE the same steps run on IST (9:15 to 15:30, flat by 15:00), and prices for .NS symbols show in rupees._
 
 TSLA, Monday 2026-10-19, 5-minute bars. The opening range is 354.47 to
 362.18. At 10:12 the 10:10 bar is still open, so it waits:

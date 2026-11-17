@@ -7,7 +7,7 @@
     python3 alerts.py add --from-plan                # stop, target and flat-by-close from trader/plan.json
     python3 alerts.py add --symbol TSLA --stop 358.32
     python3 alerts.py add --symbol TSLA --target 370.04
-    python3 alerts.py add --at 15:15 --label "flat by close" --before-close
+    python3 alerts.py add --at 15:00 --label "flat by close" --before-close
     python3 alerts.py add --symbol KO --pct 3
     python3 alerts.py add --opening-bell
     python3 alerts.py check                          # rings what hit, once; exit 1 if nothing rang
@@ -497,7 +497,7 @@ def rules_from_plan(plan, cfg_flat_by=None):
         label = plan.get("%s_label" % key)
         out.append({"id": "%s-plan-%s" % (sym.lower(), key), "symbol": sym, "type": typ, "price": float(v),
                     "note": word + (": " + label if label else "")})
-    flat = plan.get("flat_by") or cfg_flat_by or "15:15"
+    flat = plan.get("flat_by") or cfg_flat_by or "15:00"
     if _hhmm(flat) is None:
         raise AlertError("the plan's flat_by %r is not a time like 15:15" % flat)
     out.append({"id": "%s-flat-by" % sym.lower(), "symbol": sym, "type": "time", "at": flat,

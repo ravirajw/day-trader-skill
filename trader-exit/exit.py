@@ -29,7 +29,7 @@ it, a risk under 0.05% of the price (too tight to survive the spread), an
 entry.json that has not triggered (unless you give --entry), a short (v2
 plans longs only).
 
-flat_by (default 15:15, or "flat_by" in trader/config.json): out by then, win
+flat_by (default 15:00, or "flat_by" in trader/config.json): out by then, win
 or lose. NSE has no scheduled early closes.
 "min_reward_risk" in the config (default 1.0) and "max_reward_risk" (if set)
 only warn here; trader-risk enforces them.
@@ -54,7 +54,7 @@ UA = "Mozilla/5.0 (compatible; day-trader-skill/2.0; +https://github.com/Jakesch
 BACKOFF = 5.0
 HOSTS = ("query2", "query1")
 INTERVALS = {"1m": 60, "5m": 300}
-DEFAULTS = {"flat_by": "15:15", "min_reward_risk": 1.0}
+DEFAULTS = {"flat_by": "15:00", "min_reward_risk": 1.0}
 ATR_BARS = 14
 MIN_RISK_PCT = Decimal("0.05")     # risk under 0.05% of the price is inside the spread's noise
 CENT = Decimal("0.01")
@@ -710,7 +710,7 @@ def main(argv=None):
     p.add_argument("--side", default="buy", choices=["buy", "long", "sell", "short"], help="v2: buy only")
     p.add_argument("--stop", help="or-mid (orb default), or-low, price:X, pct:X, atr:K")
     p.add_argument("--target", help="2R (default), 1R, 1.5R, price:X")
-    p.add_argument("--flat-by", help="HH:MM IST (default: config flat_by, 15:15)")
+    p.add_argument("--flat-by", help="HH:MM IST (default: config flat_by, 15:00)")
     p.add_argument("--config", default="trader/config.json")
     p.add_argument("--offline", metavar="PATH", help="saved Yahoo chart JSON for an atr stop")
     p.add_argument("--now", help='pretend it is this IST, e.g. "2026-10-19 10:15"')

@@ -159,7 +159,7 @@ that draft orders to Needs approval too.
   (`alerts.py add --from-plan`). The bracket's own orders do the stopping.
 - When the stop-loss or the take-profit fills, record it:
   `ticket.py fill --symbol TSLA --side sell --qty 8 --price 358.32`.
-- By `flat_by` (15:15 IST), anything still open gets closed:
+- By `flat_by` (15:00 IST), anything still open gets closed:
   1. Ask Alpaca how many shares are held: `get_open_position` (read only).
   2. `ticket.py flatten --symbol TSLA --qty 8` writes a market sell for those
      shares to `trader/orders.json`.
@@ -173,7 +173,7 @@ that draft orders to Needs approval too.
 
 ## Example: the reel
 
-_This example is the original US recording (TSLA on the NYSE, New York time, US dollars). On NSE the same steps run on IST (9:15 to 15:30, flat by 15:15), and prices for .NS symbols show in rupees._
+_This example is the original US recording (TSLA on the NYSE, New York time, US dollars). On NSE the same steps run on IST (9:15 to 15:30, flat by 15:00), and prices for .NS symbols show in rupees._
 
 ```
 ORDER 1 of 1, PAPER account, Alpaca

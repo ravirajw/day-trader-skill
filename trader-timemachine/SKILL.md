@@ -32,7 +32,7 @@ good-looking replay does not change that.
 ```bash
 python3 "${CLAUDE_SKILL_DIR}/timemachine.py" run                    # trader/plan.json, 10,000 replays, seed 19
 python3 "${CLAUDE_SKILL_DIR}/timemachine.py" run --write            # also save trader/timemachine.json
-python3 "${CLAUDE_SKILL_DIR}/timemachine.py" run --until 15:15      # end each replay at your flat-by time
+python3 "${CLAUDE_SKILL_DIR}/timemachine.py" run --until 15:00      # end each replay at your flat-by time
 python3 "${CLAUDE_SKILL_DIR}/timemachine.py" run --json
 python3 "${CLAUDE_SKILL_DIR}/timemachine.py" run --symbol TSLA --date 2026-10-19 \
     --entry 364.18 --stop 358.32 --target 370.04 --entry-time "10:15 AM"
@@ -100,7 +100,7 @@ grid). A live in-progress bar is never used.
 
 1. Make sure `trader/plan.json` is today's plan from `/trader-exit`. If there
    is none, run that first, or pass the plan as flags.
-2. Run `timemachine.py run --write`. Add `--until 15:15` when the plan has a
+2. Run `timemachine.py run --write`. Add `--until 15:00` when the plan has a
    flat-by time, so "neither" means still open at the time you would get out.
 3. Tell the user, in this order: the four odds, the median and the 5 to 95
    range of the price at the close, the average R, the history line, then the
@@ -114,7 +114,7 @@ grid). A live in-progress bar is never used.
 
 ## Example: the reel
 
-_This example is the original US recording (TSLA on the NYSE, New York time, US dollars). On NSE the same steps run on IST (9:15 to 15:30, flat by 15:15), and prices for .NS symbols show in rupees._
+_This example is the original US recording (TSLA on the NYSE, New York time, US dollars). On NSE the same steps run on IST (9:15 to 15:30, flat by 15:00), and prices for .NS symbols show in rupees._
 
 TSLA, Monday 2026-10-19. The 15-minute opening range is 354.47 to 362.18.
 The 10:10 bar closes above it: entry 364.18 at 10:15 AM (bar 8), stop 358.32

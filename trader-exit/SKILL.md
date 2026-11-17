@@ -34,7 +34,7 @@ python3 "${CLAUDE_SKILL_DIR}/exit.py" plan --symbol TSLA --entry 364.18 --or-hig
 python3 "${CLAUDE_SKILL_DIR}/exit.py" show                          # the current trader/plan.json
 ```
 
-Other flags: `--flat-by 15:15`, `--json`, `--now "2026-10-19 10:15"` (IST), `--entry PRICE` with a waiting entry.json to plan ahead, `--setup
+Other flags: `--flat-by 15:00`, `--json`, `--now "2026-10-19 10:15"` (IST), `--entry PRICE` with a waiting entry.json to plan ahead, `--setup
 level`, `--offline FILE` (a saved Yahoo chart JSON for an ATR stop).
 
 ## What it reads and writes
@@ -42,7 +42,7 @@ level`, `--offline FILE` (a saved Yahoo chart JSON for an ATR stop).
 | file | what |
 | --- | --- |
 | `trader/entry.json` | the trigger from trader-entry: symbol, entry price, time, bar, opening range |
-| `trader/config.json` | `flat_by` (15:15) and `min_reward_risk` (1.0: a note here, trader-risk enforces it) |
+| `trader/config.json` | `flat_by` (15:00) and `min_reward_risk` (1.0: a note here, trader-risk enforces it) |
 | Yahoo chart API | only for an `atr:K` stop: the session's bars up to the entry bar, free and unofficial |
 | `trader/plan.json` | with `--write`: entry, stop and its rule, target and its R, risk a share, reward:risk, flat by. trader-timemachine, trader-budget and trader-alerts read it |
 
@@ -65,7 +65,7 @@ A level setup has no opening range to lean on, so it needs a stop you name.
   below it. A risk under 0.05% of the price: too tight to survive the
   spread, normal wiggle would stop you out. An entry.json that has not
   triggered (unless you give `--entry`). A short: v2 plans longs only.
-- **Flat by.** 15:15 by default (or `flat_by` in the config). Out by then,
+- **Flat by.** 15:00 by default (or `flat_by` in the config). Out by then,
   win or lose, no overnight hold. NSE has no scheduled early closes. An entry at or after the flat-by time is refused.
 
 ## Steps
@@ -86,7 +86,7 @@ A level setup has no opening range to lean on, so it needs a stop you name.
 
 ## Example: the reel
 
-_This example is the original US recording (TSLA on the NYSE, New York time, US dollars). On NSE the same steps run on IST (9:15 to 15:30, flat by 15:15), and prices for .NS symbols show in rupees._
+_This example is the original US recording (TSLA on the NYSE, New York time, US dollars). On NSE the same steps run on IST (9:15 to 15:30, flat by 15:00), and prices for .NS symbols show in rupees._
 
 TSLA, Monday 2026-10-19. The entry is 364.18 at 10:15 AM (the 10:10 bar,
 bar 8) and the opening range is 354.47 to 362.18. `exit.py plan --stop

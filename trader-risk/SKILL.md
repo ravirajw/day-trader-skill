@@ -119,7 +119,7 @@ not at the broker, a price too old to use, an early close today.
 
 ## Example: the reel
 
-_This example is the original US recording (TSLA on the NYSE, New York time, US dollars). On NSE the same steps run on IST (9:15 to 15:30, flat by 15:15), and prices for .NS symbols show in rupees._
+_This example is the original US recording (TSLA on the NYSE, New York time, US dollars). On NSE the same steps run on IST (9:15 to 15:30, flat by 15:00), and prices for .NS symbols show in rupees._
 
 The TSLA bracket from trader-budget at 10:15 AM on Monday 2026-10-19, on a
 fresh $5,000 paper account with the example config:

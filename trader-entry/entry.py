@@ -6,7 +6,7 @@ moment to get in. Standard library only. Long side only. It never places an orde
     python3 entry.py check TSLA --now "2026-10-19 10:15" --offline TSLA.json
     python3 entry.py check TSLA --setup level --level 371.20    # first close above a price
     python3 entry.py check TSLA --interval 1m --min-volume-x 1.5 --write
-    python3 entry.py watch TSLA --every 30 --until 15:00  # one line per closed bar
+    python3 entry.py watch TSLA --every 30 --until 11:00  # one line per closed bar
     python3 entry.py watchlist                            # every hit in today's orb scan, trader/watchlist.json
 
 Setups (v2 plans longs only):
@@ -26,12 +26,12 @@ grid count (Yahoo's live tick, e.g. 10:49:45, is dropped) and a bar counts only
 once it has closed: now >= its start + the interval.
 
 Statuses: triggered; waiting (not open yet, range still forming, or no close
-above the level yet); expired (no trigger by no_entries_after, default 15:00;
+above the level yet); expired (no trigger by no_entries_after, default 11:00;
 NSE has no scheduled early closes);
 no-data (the market is closed today or Yahoo sent no bars).
 
 trader/config.json (optional): "no_entries_before" (09:30) and
-"no_entries_after" (15:00), IST.
+"no_entries_after" (11:00), IST.
 
 watch wakes just after each bar closes (bars only change then), re-polls every
 --every seconds (default 30) while Yahoo has not posted the new bar, prints one
@@ -68,7 +68,7 @@ GRACE = 2        # seconds after a bar closes before watch asks for it
 SETTLE = 60      # seconds a closed bar may wait for Yahoo's data to catch up
 HOSTS = ("query2", "query1")
 INTERVALS = {"1m": 60, "5m": 300}
-DEFAULTS = {"no_entries_before": "09:30", "no_entries_after": "15:00"}
+DEFAULTS = {"no_entries_before": "09:30", "no_entries_after": "11:00"}
 EPOCH = datetime.datetime(1970, 1, 1)
 
 NSE_HOLIDAYS = {  # NSE circular NSE/CMTR/71775 (12 Dec 2025) + NSE/CMTR/72260 (12 Jan 2026)
@@ -765,7 +765,7 @@ def watch_loop(provider, clock, sleep, emit, opts, every=30, until=None, max_err
         else:
             nxt = open_dt + datetime.timedelta(seconds=(cur_slot + 1) * step + GRACE)
             wait = (nxt - local).total_seconds()
-        cutoff = datetime.datetime.combine(day, parse_hhmm(res.get("no_entries_after") or "15:00", "cutoff"))
+        cutoff = datetime.datetime.combine(day, parse_hhmm(res.get("no_entries_after") or "11:00", "cutoff"))
         for stop_at in (until, cutoff, close_dt):
             if stop_at and stop_at > local:
                 wait = min(wait, (stop_at - local).total_seconds())

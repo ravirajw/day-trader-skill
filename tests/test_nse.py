@@ -1,5 +1,5 @@
 """NSE behaviour across the pack: Yahoo .NS symbols kept as written, IST clock,
-the 9:15 to 15:30 session, the NSE 2026 holidays, flat by 15:15, rupees for .NS."""
+the 9:15 to 15:30 session, the NSE 2026 holidays, flat by 15:00, rupees for .NS."""
 
 import copy
 import datetime
@@ -130,20 +130,20 @@ class Holidays(unittest.TestCase):
 
 
 class FlatBy(unittest.TestCase):
-    def test_day_trades_close_by_15_15(self):
-        self.assertEqual(exitp.DEFAULTS["flat_by"], "15:15")
-        self.assertEqual(budget.DEFAULTS["flat_by"], "15:15")
-        self.assertEqual(risk.DEFAULTS["flat_by"], "15:15")
+    def test_day_trades_close_by_15_00(self):
+        self.assertEqual(exitp.DEFAULTS["flat_by"], "15:00")
+        self.assertEqual(budget.DEFAULTS["flat_by"], "15:00")
+        self.assertEqual(risk.DEFAULTS["flat_by"], "15:00")
         with open(os.path.join(os.path.dirname(budget.__file__), "config.example.json")) as fh:
-            self.assertEqual(json.load(fh)["flat_by"], "15:15")
-        self.assertEqual(exitp.resolve_flat_by(datetime.date(2026, 11, 16), None, {}, None), ("15:15", ""))
+            self.assertEqual(json.load(fh)["flat_by"], "15:00")
+        self.assertEqual(exitp.resolve_flat_by(datetime.date(2026, 11, 16), None, {}, None), ("15:00", ""))
 
-    def test_plan_alerts_ring_flat_by_15_15(self):
+    def test_plan_alerts_ring_flat_by_15_00(self):
         rules = alerts.rules_from_plan({"symbol": "RELIANCE.NS", "date": "2026-11-16", "stop": 1500, "target": 1540})
-        self.assertEqual([r["at"] for r in rules if r["type"] == "time"], ["15:15"])
+        self.assertEqual([r["at"] for r in rules if r["type"] == "time"], ["15:00"])
 
     def test_entries_stop_before_the_flat_by(self):
-        self.assertEqual(entry.DEFAULTS, {"no_entries_before": "09:30", "no_entries_after": "15:00"})
+        self.assertEqual(entry.DEFAULTS, {"no_entries_before": "09:30", "no_entries_after": "11:00"})
         self.assertLess(entry.DEFAULTS["no_entries_after"], exitp.DEFAULTS["flat_by"])
 
 

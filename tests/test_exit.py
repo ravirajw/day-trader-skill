@@ -29,7 +29,7 @@ REEL_PLAN = {"created_by": "trader-exit", "symbol": "TSLA", "side": "buy", "date
              "opening_range": {"high": 362.18, "low": 354.47, "minutes": 15},
              "stop": 358.32, "stop_rule": "or_mid", "stop_label": "opening-range midpoint",
              "target": 370.04, "target_r": 1.0, "target_label": "1R (one times the risk)",
-             "risk_per_share": 5.86, "reward_risk": 1.0, "flat_by": "15:15"}
+             "risk_per_share": 5.86, "reward_risk": 1.0, "flat_by": "15:00"}
 REEL_ENTRY = {"created_by": "trader-entry", "symbol": "TSLA", "setup": "orb", "side": "buy", "date": "2026-10-19",
               "status": "triggered", "time": "10:00 AM", "bar_start": "09:55", "bar_index": 8, "price": 364.18,
               "level": 362.18, "interval": "5m", "opening_range": {"high": 362.18, "low": 354.47, "minutes": 15},
@@ -173,7 +173,7 @@ class Cli(unittest.TestCase):
         self.assertIn("Target        $370.04  1R (one times the risk)", text)
         self.assertIn("Risk a share  $5.86 (1.61% of the entry)", text)
         self.assertIn("Reward:risk   1.0", text)
-        self.assertIn("Flat by       15:15 IST", text)
+        self.assertIn("Flat by       15:00 IST", text)
         self.assertIn("not a guarantee", text)
         self.assertIn("/trader-timemachine", text)
         self.assertNotIn("pro" + "fit", text.lower())   # never on screen
@@ -205,7 +205,7 @@ class Cli(unittest.TestCase):
         self.assertIn("Entry         \u20b91,412.50", text)
         self.assertIn("Stop          \u20b91,400.00", text)
         self.assertIn("Target        \u20b91,437.50", text)
-        self.assertIn("Flat by       15:15 IST", text)
+        self.assertIn("Flat by       15:00 IST", text)
         self.assertNotIn("$", text)
         code, _, err = self.plan("--symbol", "RELIANCE.NS", "--entry", "1412.50", "--stop", "price:1420")
         self.assertEqual(code, 1)
@@ -271,14 +271,14 @@ class Cli(unittest.TestCase):
         self.write(os.path.join("trader", "entry.json"), half)
         code, text, _ = run(exitp, ["plan", "--now", "2026-11-27 10:01"])
         self.assertEqual(code, 0)
-        self.assertIn("Flat by       15:15 IST", text)                 # NSE: no early closes
+        self.assertIn("Flat by       15:00 IST", text)                 # NSE: no early closes
         self.assertNotIn("early close", text)
         # the mechanism still moves the flat-by if an early close is ever listed
         exitp.NSE_EARLY_CLOSE["2026-11-27"] = "test early close"
         try:
             code, text, _ = run(exitp, ["plan", "--now", "2026-11-27 10:01"])
             self.assertEqual(code, 0)
-            self.assertIn("Flat by       12:45 IST", text)
+            self.assertIn("Flat by       12:30 IST", text)
             self.assertIn("early close", text)
             code, _, err = run(exitp, ["plan", "--now", "2026-11-27 10:01", "--flat-by", "14:00"])
             self.assertEqual(code, 1)

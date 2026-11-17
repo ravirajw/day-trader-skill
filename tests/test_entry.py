@@ -177,10 +177,10 @@ class Rules(unittest.TestCase):
         d = no_breakout()
         r = at("2026-10-19 10:34", d)
         self.assertEqual(r["status"], "waiting")
-        self.assertEqual(at("2026-10-19 14:59", d)["status"], "waiting")
-        r = at("2026-10-19 15:00", d)
+        self.assertEqual(at("2026-10-19 10:59", d)["status"], "waiting")
+        r = at("2026-10-19 11:00", d)
         self.assertEqual(r["status"], "expired")
-        self.assertIn("by 15:00", r["reason"])
+        self.assertIn("by 11:00", r["reason"])
         self.assertEqual(at("2026-10-19 16:00", d)["phase"], "after-close")
 
     def test_the_bar_closing_at_the_cutoff_still_counts_when_yahoo_lags(self):
@@ -276,9 +276,9 @@ class Calendar(unittest.TestCase):
     def test_nse_has_no_scheduled_early_close(self):
         self.assertEqual(entry.NSE_EARLY_CLOSE, {})
         d = shift_to(no_breakout(), datetime.date(2026, 11, 27))
-        r = entry.evaluate(chart(d), ny("2026-11-27 14:59"))
+        r = entry.evaluate(chart(d), ny("2026-11-27 10:59"))
         self.assertEqual(r["status"], "waiting")
-        self.assertEqual((r["closes"], r["no_entries_after"]), ("15:30", "15:00"))
+        self.assertEqual((r["closes"], r["no_entries_after"]), ("15:30", "11:00"))
         r = entry.evaluate(chart(shift_to(doc(), datetime.date(2026, 11, 27))), ny("2026-11-27 10:00"))
         self.assertNotIn("Early close today", "\n".join(entry.describe(r)))
 
@@ -287,10 +287,11 @@ class Calendar(unittest.TestCase):
         entry.NSE_EARLY_CLOSE["2026-11-27"] = "test half day"
         self.addCleanup(entry.NSE_EARLY_CLOSE.pop, "2026-11-27", None)
         d = shift_to(no_breakout(), datetime.date(2026, 11, 27))
-        r = entry.evaluate(chart(d), ny("2026-11-27 12:29"))
+        late = {"no_entries_before": "09:30", "no_entries_after": "15:00"}   # a cutoff after the early close
+        r = entry.evaluate(chart(d), ny("2026-11-27 12:29"), cfg=late)
         self.assertEqual(r["status"], "waiting")
         self.assertEqual((r["closes"], r["no_entries_after"]), ("13:00", "12:30"))
-        r = entry.evaluate(chart(d), ny("2026-11-27 12:30"))
+        r = entry.evaluate(chart(d), ny("2026-11-27 12:30"), cfg=late)
         self.assertEqual(r["status"], "expired")
         self.assertIn("early close", r["reason"])
         r = entry.evaluate(chart(shift_to(doc(), datetime.date(2026, 11, 27))), ny("2026-11-27 10:00"))
@@ -492,11 +493,11 @@ class Watch(unittest.TestCase):
         self.assertEqual(res["trigger"]["time"], "10:00 AM")
 
     def test_expires_and_until(self):
-        code, res, lines, fired, clock = self.loop(live_provider(no_breakout()), "2026-10-19 14:30", every=300)
+        code, res, lines, fired, clock = self.loop(live_provider(no_breakout()), "2026-10-19 10:30", every=300)
         self.assertEqual(code, 1)
         self.assertEqual(res["status"], "expired")
         self.assertEqual(fired, [])
-        self.assertEqual(entry.to_ist(clock.now()).strftime("%H:%M"), "15:00")   # the no_entries_after cutoff
+        self.assertEqual(entry.to_ist(clock.now()).strftime("%H:%M"), "11:00")   # the no_entries_after cutoff
         until = DT(2026, 10, 19, 10, 45)
         code, res, lines, fired, clock = self.loop(live_provider(no_breakout()), "2026-10-19 10:15", every=300,
                                                    until=until)

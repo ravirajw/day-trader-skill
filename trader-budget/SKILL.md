@@ -59,7 +59,7 @@ If `trader/config.json` does not exist, copy `config.example.json` into
   budget), the biggest order ($4,000) and the smallest order ($5).
 - The day limits trader-risk enforces: **max_daily_loss_usd** (150), **max_trades_per_day** (3),
   **min_reward_risk** (1.0), **max_reward_risk** (optional, off by default), **require_stop** (true), **no_entries_before** / **no_entries_after**
-  ("09:30" / "15:00") and **flat_by** ("15:15"), all IST.
+  ("09:30" / "11:00") and **flat_by** ("15:00"), all IST.
 - **blocked**: tickers they never want to trade.
 - Keep **paper** true until they have watched it work on a paper account.
 
@@ -99,7 +99,7 @@ promise: in a fast market it can fill below the stop. Then hand over to
 
 ## Example: the reel
 
-_This example is the original US recording (TSLA on the NYSE, New York time, US dollars). On NSE the same steps run on IST (9:15 to 15:30, flat by 15:15), and prices for .NS symbols show in rupees._
+_This example is the original US recording (TSLA on the NYSE, New York time, US dollars). On NSE the same steps run on IST (9:15 to 15:30, flat by 15:00), and prices for .NS symbols show in rupees._
 
 TSLA on Monday 2026-10-19. Opening-range breakout: entry 364.18 at 10:15 AM,
 stop 358.32 (the opening-range midpoint), target 370.04 (1R). Risk 5.86 a

@@ -178,7 +178,7 @@ class DayTradeChecks(unittest.TestCase):
         self.assertIn("loss: 8 shares x 8.16 risk a share = $65.28", reasons(res))
 
     def test_a_stale_or_future_price_is_not_used(self):
-        for now in ("2026-10-19 11:15", "2026-10-19 10:00"):
+        for now in ("2026-10-19 10:55", "2026-10-19 10:00"):   # 10:55: the 10:37 quote is 18 minutes old
             res = check.check([tsla()], cfg(), prices={"TSLA": 366.475}, now=at(now),
                               price_times={"TSLA": QUOTE_TIME})
             self.assertEqual(verdicts(res), ["PASS"], now)
@@ -226,7 +226,7 @@ class DayTradeChecks(unittest.TestCase):
 
     def test_entry_window_ist(self):
         cases = [("2026-10-19 09:29", "no new entries before 09:30 IST (it is 09:29)"),
-                 ("2026-10-19 15:01", "no new entries after 15:00 IST (it is 15:01)"),
+                 ("2026-10-19 11:01", "no new entries after 11:00 IST (it is 11:01)"),
                  ("2026-10-19 08:00", "the market is closed (Mon 2026-10-19 08:00"),
                  ("2026-10-19 15:35", "the market is closed"),
                  ("2026-10-17 10:15", "the market is closed today (weekend"),
@@ -235,17 +235,18 @@ class DayTradeChecks(unittest.TestCase):
         for now, want in cases:
             res = self.one(tsla(), now=now)
             self.assertIn("window: " + want, reasons(res), now)
-        for now in ("2026-10-19 09:30", "2026-10-19 15:00", "2026-11-27 12:31", "2026-11-02T04:00:00Z",
+        for now in ("2026-10-19 09:30", "2026-10-19 11:00", "2026-11-27 10:31", "2026-11-02T04:00:00Z",
                     "2026-10-30T05:10:00Z", "2026-03-09T04:20:00Z"):
             self.assertEqual(verdicts(self.one(tsla(), now=now)), ["PASS"], now)
         self.assertEqual(self.one(tsla(), now="2026-11-27 12:30")["warnings"], [])   # NSE: no early closes
         # the window still moves up with an early close if one is ever listed (by 3 hours, as in the source)
         check.NSE_EARLY_CLOSE["2026-11-27"] = "test early close"
         try:
-            self.assertIn("window: no new entries after 12:00 IST", reasons(self.one(tsla(), now="2026-11-27 12:01")))
-            self.assertIn("window: the market is closed", reasons(self.one(tsla(), now="2026-11-27 13:05")))
-            self.assertEqual(verdicts(self.one(tsla(), now="2026-11-27 12:00")), ["PASS"])
-            self.assertIn("early close", " ".join(self.one(tsla(), now="2026-11-27 12:00")["warnings"]))
+            late = {"no_entries_after": "15:00"}   # a cutoff after the early close
+            self.assertIn("window: no new entries after 12:00 IST", reasons(self.one(tsla(), now="2026-11-27 12:01", **late)))
+            self.assertIn("window: the market is closed", reasons(self.one(tsla(), now="2026-11-27 13:05", **late)))
+            self.assertEqual(verdicts(self.one(tsla(), now="2026-11-27 12:00", **late)), ["PASS"])
+            self.assertIn("early close", " ".join(self.one(tsla(), now="2026-11-27 12:00", **late)["warnings"]))
         finally:
             del check.NSE_EARLY_CLOSE["2026-11-27"]
         res = self.one(tsla(), now="2026-10-17 10:15", no_entries_before=None, no_entries_after=None)
@@ -492,7 +493,7 @@ class Cli(unittest.TestCase):
                 self.assertEqual(check.main(base + ["--now", "2026-10-19 10:40"]), 1)
             self.assertIn("8 shares x 8.16 risk a share = $65.28", buf.getvalue())
             with redirect_stdout(io.StringIO()):
-                self.assertEqual(check.main(base + ["--now", "2026-10-19 11:15"]), 0)
+                self.assertEqual(check.main(base + ["--now", "2026-10-19 10:55"]), 0)
 
     def test_v1_orders_with_a_v1_config_file(self):
         with tempfile.TemporaryDirectory() as d:

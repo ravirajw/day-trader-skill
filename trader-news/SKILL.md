@@ -78,7 +78,7 @@ morning before the open.
 
 ## Example: the reel
 
-_This example is the original US recording (TSLA on the NYSE, New York time, US dollars). On NSE the same steps run on IST (9:15 to 15:30, flat by 15:15), and prices for .NS symbols show in rupees._
+_This example is the original US recording (TSLA on the NYSE, New York time, US dollars). On NSE the same steps run on IST (9:15 to 15:30, flat by 15:00), and prices for .NS symbols show in rupees._
 
 Monday 2026-10-19, TSLA broke its opening range at 10:15 AM ET. The check at
 10:15 (Yahoo Finance's TSLA feed, 16 headlines since 8:00) leads with the

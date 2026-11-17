@@ -59,7 +59,7 @@ reason is one plain line).
 | `trader/universe.txt` | written by `universe`: one `SYMBOL\|Name` a line, read by `daily` and `orb` |
 | `trader/watchlist-daily.json` | written by `daily` (never by `orb`): `mode`, `as_of`, `universe`, `scanned`, `failed`, `hits[]`. `orb` scans its `hits[].symbol` when no `--symbols` / `--watchlist` / `--universe` is given, and stops with a plain line, before fetching anything, if the file is missing or is not the daily scan of the previous NSE trading day's close (`mode` daily, `as_of` that date; weekends and NSE holidays skipped). trader-news reads it too |
 | `trader/watchlist.json` | written by `orb`, the same shape plus each hit's range (`or_high`, `or_low`, `at`, `price`). Re-running `orb` during the morning overwrites only this file, so the daily list is never lost. trader-news and trader-entry read `hits[].symbol` |
-| `trader/config.json` | `no_entries_after` (default 15:00), read by `orb`; `daily_min_volume` (optional, default 1,000,000 shares): the daily scan's volume floor when no `--min-volume` is given; `watchlist` (optional): a file of tickers that `daily` scans when no `--symbols` / `--watchlist` is given, instead of the US universe |
+| `trader/config.json` | `no_entries_after` (default 11:00), read by `orb`; `daily_min_volume` (optional, default 1,000,000 shares): the daily scan's volume floor when no `--min-volume` is given; `watchlist` (optional): a file of tickers that `daily` scans when no `--symbols` / `--watchlist` is given, instead of the US universe |
 
 ## The universe
 
@@ -227,7 +227,7 @@ Within one verdict the clearer lean ranks higher, then the earlier breakout.
 
 ## Example: the reel
 
-_This example is the original US recording (TSLA on the NYSE, New York time, US dollars). On NSE the same steps run on IST (9:15 to 15:30, flat by 15:15), and prices for .NS symbols show in rupees._
+_This example is the original US recording (TSLA on the NYSE, New York time, US dollars). On NSE the same steps run on IST (9:15 to 15:30, flat by 15:00), and prices for .NS symbols show in rupees._
 
 Monday Oct 19 2026, scan at 10:15 AM over the reel's 234-ticker wall
 (`tests/fixtures/trader-scanner/wall5m-2026-10-19.json.gz`, real Yahoo charts):

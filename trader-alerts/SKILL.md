@@ -9,7 +9,7 @@ description: >-
   with the 2026 holidays, works out India time (IST) itself, fetches free delayed quotes (Yahoo chart JSON, Stooq
   CSV) one ticker at a time, and writes trader/prices.json for sizing and the
   risk check. Use when the user says "alert me when", "tell me if TSLA hits",
-  "watch my stop", "watch my trade", "remind me to close by 3:15", "is the
+  "watch my stop", "watch my trade", "remind me to close by 3:00", "is the
   market open", "when does the market open", "get me a price", or right
   after /trader-exit writes a plan.
 argument-hint: "[ticker] [price]"
@@ -31,7 +31,7 @@ python3 "${CLAUDE_SKILL_DIR}/alerts.py" add --from-plan                # stop, t
 python3 "${CLAUDE_SKILL_DIR}/alerts.py" add --opening-bell
 python3 "${CLAUDE_SKILL_DIR}/alerts.py" add --symbol TSLA --stop 358.32
 python3 "${CLAUDE_SKILL_DIR}/alerts.py" add --symbol TSLA --target 370.04
-python3 "${CLAUDE_SKILL_DIR}/alerts.py" add --at 15:15 --label "flat by close" --before-close
+python3 "${CLAUDE_SKILL_DIR}/alerts.py" add --at 15:00 --label "flat by close" --before-close
 python3 "${CLAUDE_SKILL_DIR}/alerts.py" add --symbol KO --pct 3
 python3 "${CLAUDE_SKILL_DIR}/alerts.py" check                          # exit 0 = something rang
 python3 "${CLAUDE_SKILL_DIR}/alerts.py" quote TSLA --write             # -> trader/prices.json
@@ -114,7 +114,7 @@ holiday list is unknown.
 
 ## Example: the reel
 
-_This example is the original US recording (TSLA on the NYSE, New York time, US dollars). On NSE the same steps run on IST (9:15 to 15:30, flat by 15:15), and prices for .NS symbols show in rupees._
+_This example is the original US recording (TSLA on the NYSE, New York time, US dollars). On NSE the same steps run on IST (9:15 to 15:30, flat by 15:00), and prices for .NS symbols show in rupees._
 
 TSLA on Monday 2026-10-19: entry 364.18 at 10:15 AM, stop 358.32, target
 370.04, flat by 15:55. `add --from-plan` writes `tsla-plan-stop`,

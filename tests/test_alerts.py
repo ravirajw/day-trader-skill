@@ -35,9 +35,9 @@ def run(argv):
 
 
 def nse_plan():
-    """The recorded TSLA plan as trader-exit writes it now: flat by 15:15 IST."""
+    """The recorded TSLA plan as trader-exit writes it now: flat by 15:00 IST."""
     with open(PLAN) as fh:
-        return dict(json.load(fh), flat_by="15:15")
+        return dict(json.load(fh), flat_by="15:00")
 
 
 def plan_rules():
@@ -288,7 +288,7 @@ class Rules(unittest.TestCase):
         self.assertEqual([(r["id"], r["type"]) for r in rules],
                          [("tsla-plan-stop", "stop"), ("tsla-plan-target", "target"), ("tsla-flat-by", "time")])
         self.assertEqual((rules[0]["price"], rules[1]["price"]), (358.32, 370.04))
-        self.assertEqual((rules[2]["at"], rules[2]["label"], rules[2]["before_close"]), ("15:15", "flat by close", True))
+        self.assertEqual((rules[2]["at"], rules[2]["label"], rules[2]["before_close"]), ("15:00", "flat by close", True))
         self.assertTrue(all(r["date"] == "2026-10-19" for r in rules))
         rings, st = self.at("2026-10-19 10:52", rules)          # the real 10:52 quote, 366.475
         self.assertEqual(rings, [])
@@ -303,15 +303,15 @@ class Rules(unittest.TestCase):
 
     def test_flat_by_close_rings_once_per_trading_day(self):
         rules = plan_rules()[2:]
-        self.assertEqual(self.at("2026-10-19 15:14", rules)[0], [])
-        rings, st = self.at("2026-10-19 15:15", rules)
+        self.assertEqual(self.at("2026-10-19 14:59", rules)[0], [])
+        rings, st = self.at("2026-10-19 15:00", rules)
         self.assertEqual(len(rings), 1)
-        self.assertIn("Flat by close: it is 15:15 IST (set for 15:15), the market closes at 15:30", rings[0]["message"])
+        self.assertIn("Flat by close: it is 15:00 IST (set for 15:00), the market closes at 15:30", rings[0]["message"])
         self.assertIn("trader-broker flatten --symbol TSLA", rings[0]["message"])
-        self.assertEqual(self.at("2026-10-19 15:19", rules, st)[0], [])
+        self.assertEqual(self.at("2026-10-19 15:04", rules, st)[0], [])
         rings, _ = self.at("2026-10-19 15:40", rules)
         self.assertIn("the market has closed", rings[0]["message"])
-        self.assertEqual(self.at("2026-10-21 15:16", rules, st)[0], [])     # plan rules: their day only
+        self.assertEqual(self.at("2026-10-21 15:01", rules, st)[0], [])     # plan rules: their day only
 
     def test_a_time_alert_rings_at_its_own_time_with_no_early_close(self):
         rule = [{"id": "flat", "type": "time", "at": "15:15", "label": "flat by close", "before_close": True}]

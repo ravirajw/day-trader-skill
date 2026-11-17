@@ -72,7 +72,7 @@ DEFAULTS = {
     "budget": None, "cash_buffer_pct": 10, "max_position_pct": 75, "max_order_usd": 4000,
     "min_order_usd": 5, "max_loss_per_trade_usd": 50, "max_daily_loss_usd": 150, "max_trades_per_day": 3,
     "max_orders_per_day": 10, "min_reward_risk": 1.0, "require_stop": True,
-    "no_entries_before": "09:30", "no_entries_after": "15:00", "flat_by": "15:15",
+    "no_entries_before": "09:30", "no_entries_after": "11:00", "flat_by": "15:00",
     "paper": True, "blocked": [], "allow_options": False, "allow_margin": False, "allow_short": False,
     "pdt_guard": False,
 }
