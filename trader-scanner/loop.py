@@ -519,8 +519,9 @@ def short_row(r):
         sym, r["breakout_at"], scan.money(r["entry"], sym), scan.money(r["stop"], sym), targets, r["qty"], head)
 
 
-def run_once(cutoff, day, symbols, state, rules, clock, a, offline_data, out):
-    """One run at `cutoff`: new breakouts -> rows, the Time Machine in parallel, sort, write. -> new rows."""
+def run_once(cutoff, day, symbols, state, rules, clock, a, offline_data, out, tally=None):
+    """One run at `cutoff`: new breakouts -> rows, the Time Machine in parallel, sort, write. -> new rows,
+    or None when the check failed. `tally` (a dict) adds up how many stocks had usable bars."""
     done = moved(state)
     pending = [s for s in symbols if s not in done]
     found_at = scan.clock_label(cutoff + datetime.timedelta(seconds=a.delay))  # the run's time, e.g. 9:36 AM
@@ -528,6 +529,8 @@ def run_once(cutoff, day, symbols, state, rules, clock, a, offline_data, out):
         return []
     try:
         hits, counts, _ = scan_once(cutoff, day, pending, a, offline_data)
+        if tally is not None:
+            tally["scanned"] = tally.get("scanned", 0) + counts.get("scanned", 0)
     except scan.ScanError as e:
         out("%s  check failed: %s (trying again at the next run)" % (found_at, e))
         return None  # a failed check, not "no breakouts": --force stops on it
@@ -615,11 +618,14 @@ def cmd_run(a, out=print):
         # closes only), replayed bar by bar: a later gap cannot hide an earlier breakout, and a failed
         # download stops here, before today's sheet is touched
         offline_data, failed = fetch_charts(symbols)
-        if not offline_data:
-            raise LoopError("--force: no charts came back for %d stocks. Today's sheet was left as it was."
-                            % len(symbols))
-        if failed:
-            out("--force: no chart for %s; left out of the sheet." % ", ".join(sorted(failed)))
+        if failed:  # one more try after a pause (Yahoo's free endpoint answers 429 when asked too fast)
+            out("--force: trying %s again in %g s." % (", ".join(sorted(failed)), scan.BACKOFF))
+            scan.SLEEP(scan.BACKOFF)
+            more, failed = fetch_charts(sorted(failed))
+            offline_data.update(more)
+        if failed:  # all or nothing: a sheet missing stocks must not replace today's
+            raise LoopError("--force: no chart for %s (%s). Today's sheet was left as it was; run it again in a "
+                            "minute." % (", ".join(sorted(failed)), "; ".join(sorted(set(failed.values())))))
     state = fresh_state(day) if forced else load_state(a.state, day, rules)  # --force overwrites today's
     sheet = a.sheet or SHEET % day.isoformat()
     if os.path.exists(a.stop_file) and not forced:  # a stop request belongs to a running loop
@@ -657,13 +663,18 @@ def cmd_run(a, out=print):
     finished = not forced  # a --force rebuild is saved only when it finishes
     try:
         if forced:
+            tally = {}
             for c in forced:
-                if run_once(c, day, symbols, state, rules, clock, a, offline_data, out) is None:
+                if run_once(c, day, symbols, state, rules, clock, a, offline_data, out, tally) is None:
                     raise LoopError("--force stopped: the %s check failed (above). Today's sheet was left as "
                                     "it was." % scan.clock_label(c))
                 state["last_scan"] = "%s %s IST" % (day.isoformat(), c.strftime("%H:%M"))
                 if len(moved(state)) >= len(symbols):
                     break
+            if not state["rows"] and not tally.get("scanned"):
+                raise LoopError("--force: no stock had usable bars for %s at any run (Yahoo sent no bars of that "
+                                "day, or the charts are stale). Today's sheet was left as it was."
+                                % scan.day_label(day))
             finished = True
             reason = "--force rebuilt today's sheet, runs %s to %s" % (
                 scan.clock_label(forced[0] + datetime.timedelta(seconds=a.delay)),

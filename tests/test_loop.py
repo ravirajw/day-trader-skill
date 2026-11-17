@@ -391,6 +391,68 @@ class Force(Base):
         self.assertEqual(sorted(r["symbol"] for r in self.saved()["rows"]), ["MSFT", "TSLA"])
         self.assertEqual(len(asked), 2)                                # one chart per stock, once
 
+    def fake_yahoo(self, fails):
+        """Yahoo answering from the recorded wall; `fails` = {SYM: how many times its chart fails first}."""
+        import gzip
+        with gzip.open(WALL, "rt") if WALL.endswith(".gz") else open(WALL) as fh:
+            wall = json.load(fh)
+        left = dict(fails)
+        sleeps = []
+
+        def fake_get(path, *args, **kw):
+            sym = path.split("/v8/finance/chart/")[1].split("?")[0]
+            if left.get(sym, 0) > 0:
+                left[sym] -= 1
+                raise loop.scan.ScanError("Yahoo answered HTTP 429 for /v8/finance/chart/%s" % sym)
+            return json.dumps(wall[sym])
+        for name, value in (("yahoo_get", fake_get), ("SLEEP", sleeps.append)):
+            self.addCleanup(setattr, loop.scan, name, getattr(loop.scan, name))
+            setattr(loop.scan, name, value)
+        return sleeps
+
+    def force_live(self):
+        argv = ["run", "--tm-offline", TM_DIR, "--now", "2026-10-19 13:00", "--config", self.cfg, "--state",
+                self.state, "--sheet", self.sheet, "--stop-file", self.stop, "--replays", "2000",
+                "--symbols", "TSLA,MSFT", "--force", "--last-run", "10:11"]
+        lines, err = [], io.StringIO()
+        with redirect_stderr(err):
+            code = loop.main(argv, lines.append)
+        return code, "\n".join(lines), err.getvalue()
+
+    def test_a_download_that_fails_once_is_tried_again(self):
+        sleeps = self.fake_yahoo({"MSFT": 1})
+        code, text, _ = self.force_live()
+        self.assertEqual(code, 0)
+        self.assertEqual(sorted(r["symbol"] for r in self.saved()["rows"]), ["MSFT", "TSLA"])
+        self.assertIn(loop.scan.BACKOFF, sleeps)                       # waited before the retry
+        self.assertIn("trying MSFT again", text)
+
+    def test_a_download_that_keeps_failing_leaves_todays_sheet_alone(self):
+        self.run_loop("--symbols", "TSLA,MSFT")
+        before = open(self.state).read()
+        self.fake_yahoo({"MSFT": 2})
+        code, _, err = self.force_live()
+        self.assertEqual(code, 1)
+        self.assertIn("no chart for MSFT", err)
+        self.assertIn("Today's sheet was left as it was", err)
+        self.assertEqual(open(self.state).read(), before)
+
+    def test_charts_with_no_usable_bars_leave_the_sheet_alone(self):
+        # the recorded wall is Mon 19 Oct; rebuilding Wed 21 Oct from it finds no bar of the 21st in any chart
+        # (a stale or empty Yahoo answer looks the same): nothing usable, so nothing is overwritten
+        day2 = loop.fresh_state(datetime.date(2026, 10, 21))
+        day2["rows"].append(dict(row("TSLA", "Leans toward the target: ..."), target1=1.0, target2=2.0, rr1=1.0,
+                                 rr2=2.0, entry=1.0, stop=0.5, qty=1))
+        with open(self.state, "w") as fh:
+            json.dump(day2, fh)
+        before = open(self.state).read()
+        code, _, err = self.run_loop("--symbols", "TSLA,MSFT", "--force", "--last-run", "10:11",
+                                     now="2026-10-21 13:00")
+        self.assertEqual(code, 1)
+        self.assertIn("no stock had usable bars", err)
+        self.assertIn("Today's sheet was left as it was", err)
+        self.assertEqual(open(self.state).read(), before)
+
     def test_a_failed_check_leaves_todays_sheet_alone(self):
         self.run_loop("--symbols", "TSLA,MSFT")
         before = open(self.state).read()

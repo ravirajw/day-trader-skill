@@ -203,8 +203,9 @@ Within one verdict the clearer lean ranks higher, then the earlier breakout.
   morning loop would have: same breakout bars, same "Found at" times, and a
   missing bar later in the morning cannot hide an earlier breakout. Today's
   `trader/orb-YYYY-MM-DD.xlsx` and `trader/loop.json` are overwritten only
-  when the rebuild finishes; a failed download, a failed check or Ctrl+C
-  leaves them as they were. It does not touch a stop request (`loop.py stop`)
+  when the rebuild is complete: a chart that fails twice (one retry after a
+  5 s pause), charts with no usable bars for the day (stale or empty
+  answers), a failed check or Ctrl+C all leave them as they were. It does not touch a stop request (`loop.py stop`)
   meant for a loop running in another terminal. The sheet shows the
   morning's breakout prices and odds, not the current price: check the live
   price before placing anything. Before the first run (9:36 AM) there is
