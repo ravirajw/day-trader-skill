@@ -83,14 +83,22 @@ class Qty(unittest.TestCase):
     def test_a_share_riskier_than_the_max_risk_is_qty_0(self):
         self.assertEqual(loop.qty_for(500.0, 400.0, 50, 30000), (0, "max risk"))
 
-    def test_the_config_must_have_the_three_numbers(self):
-        self.assertEqual(loop.rules_from(CONFIG), {"max_risk": 50.0, "max_amount": 4000.0, "rr": 2.0})
-        for k in ("max_loss_per_trade_usd", "max_order_usd", "max_reward_risk"):
+    def test_the_config_must_have_the_four_numbers(self):
+        self.assertEqual(loop.rules_from(CONFIG), {"max_risk": 50.0, "max_amount": 4000.0, "rr1": 1.0, "rr2": 2.0})
+        for k in ("max_loss_per_trade_usd", "max_order_usd", "min_reward_risk", "max_reward_risk"):
             cfg = dict(CONFIG)
             del cfg[k]
             with self.assertRaises(loop.LoopError) as cm:
                 loop.rules_from(cfg)
             self.assertIn(k, str(cm.exception))
+
+
+    def test_min_reward_risk_must_be_under_max(self):
+        for rr1 in (2, 3):
+            with self.assertRaises(loop.LoopError) as cm:
+                loop.rules_from(dict(CONFIG, min_reward_risk=rr1))
+            self.assertIn("min_reward_risk", str(cm.exception))
+            self.assertIn("max_reward_risk", str(cm.exception))
 
 
 class Sorting(unittest.TestCase):
@@ -146,22 +154,35 @@ class Replay(Base):
         rows = self.saved()["rows"]
         self.assertEqual([r["symbol"] for r in rows], ["TSLA", "MSFT"])
         t, m = rows
-        # entry = the 10:00 bar's close, stop = range midpoint, target = 2R (max_reward_risk),
-        # qty = min(50 / 5.86, 4000 / 364.18) = 8
-        self.assertEqual((t["entry"], t["stop"], t["target"], t["qty"], t["limited_by"]),
-                         (364.18, 358.32, 375.9, 8, "max risk"))
+        # entry = the 10:00 bar's close, stop = range midpoint, Target 1 = 1R (min_reward_risk),
+        # Target 2 = 2R (max_reward_risk), qty = min(50 / 5.86, 4000 / 364.18) = 8
+        self.assertEqual((t["entry"], t["stop"], t["target1"], t["target2"], t["qty"], t["limited_by"]),
+                         (364.18, 358.32, 370.04, 375.9, 8, "max risk"))
         self.assertEqual((t["breakout_at"], t["found_at"], t["max_loss"], t["cost"]),
                          ("10:00 AM", "10:01 AM", 46.88, 2913.44))
-        self.assertTrue(t["verdict"].startswith("Strongly toward the stop"))
+        # the Time Machine runs on Target 1 (1R): target first 27.5 % vs stop first 21.5 %
+        self.assertTrue(t["verdict"].startswith("Leans toward the target"))
         self.assertTrue(m["verdict"].startswith("Time Machine failed: no MSFT-60d5m.json"))
         self.assertEqual(m["group"], loop.FAILED)
         self.assertEqual(text.count("+ MSFT"), 1)
 
-    def test_target_follows_max_reward_risk(self):
-        self.write_config(dict(CONFIG, max_reward_risk=3.1))
+    def test_targets_follow_the_config(self):
+        self.write_config(dict(CONFIG, min_reward_risk=1.5, max_reward_risk=3.1))
         self.run_loop("--symbols", "TSLA")
         t = self.saved()["rows"][0]
-        self.assertEqual((t["target"], t["rr"]), (382.35, 3.1))  # 364.18 + 3.1 x 5.86 = 382.346
+        # 364.18 + 1.5 x 5.86 = 372.97; 364.18 + 3.1 x 5.86 = 382.346
+        self.assertEqual((t["target1"], t["target2"], t["rr1"], t["rr2"]), (372.97, 382.35, 1.5, 3.1))
+
+    def test_target_2_uses_its_own_nse_price_band(self):
+        hit = {"symbol": "X.NS", "at": "10:00 AM", "or_high": 995.0, "or_low": 985.2, "price": 995.35,
+               "bar_index": 8}
+        rules = {"max_risk": 900.0, "max_amount": 30000.0, "rr1": 1.78, "rr2": 3.45}
+        a = argparse.Namespace(or_minutes=15, config=self.cfg)
+        r, plan = loop.plan_row(hit, DAY, "10:01 AM", DT(2026, 10, 19, 4, 31), rules, a)
+        # stop = or-mid 990.10, risk 5.25: 995.35 + 1.78 x 5.25 = 1004.695 and + 3.45 x 5.25 = 1013.4625,
+        # both above 1,000, so on the 0.10 step
+        self.assertEqual((r["stop"], r["target1"], r["target2"]), (990.1, 1004.7, 1013.5))
+        self.assertEqual(plan["target"], 1004.7)
 
     def test_the_sheet_is_a_real_xlsx_in_sorted_order(self):
         self.run_loop("--symbols", "TSLA,MSFT")
@@ -174,8 +195,11 @@ class Replay(Base):
         self.assertEqual(names, {"[Content_Types].xml", "_rels/.rels", "xl/workbook.xml",
                                  "xl/_rels/workbook.xml.rels", "xl/styles.xml", "xl/worksheets/sheet1.xml"})
         self.assertIn('state="frozen"', sheet)
-        for head in ("Rank", "Symbol", "Breakout time", "Entry", "Stop", "Target", "Qty", "Verdict"):
+        for head in ("Rank", "Symbol", "Breakout time", "Entry", "Stop", "Target 1 (1R)", "Target 2 (2R)", "Qty",
+                     "Target 1 first", "Verdict"):
             self.assertIn("<t xml:space=\"preserve\">%s</t>" % head, sheet)
+        for gone in ("R:R", "Target"):
+            self.assertNotIn("<t xml:space=\"preserve\">%s</t>" % gone, sheet)
         self.assertLess(sheet.index(">TSLA<"), sheet.index(">MSFT<"))
         self.assertIn('<c r="E2" s="2"><v>362.18</v></c>', sheet)  # range high, as a number
 
@@ -225,6 +249,77 @@ class Commands(Base):
         self.assertIn("  1. TSLA", text)
         self.assertIn("  2. MSFT", text)
 
+    def test_the_target_heads_come_from_the_config(self):
+        self.assertEqual([h for h in loop.column_heads(None) if h.startswith("Target ")][:2], ["Target 1", "Target 2"])
+        heads = loop.column_heads({"rr1": 1.78, "rr2": 3.45})
+        self.assertIn("Target 1 (1.78R)", heads)
+        self.assertIn("Target 2 (3.45R)", heads)
+
+    def write_old_state(self, rr):
+        # a loop.json saved earlier today, before the sheet had two targets: one target at max_reward_risk
+        old = loop.fresh_state(DAY)
+        old["rows"].append(dict(row("TSLA", "Strongly toward the stop: ..."), target=375.9, rr=rr, entry=364.18,
+                                stop=358.32, qty=8))
+        with open(self.state, "w") as fh:
+            json.dump(old, fh)
+
+    def test_an_old_row_target_goes_under_the_column_with_its_r(self):
+        self.write_old_state(2.0)
+        r = loop.load_state(self.state, DAY, loop.rules_from(CONFIG))["rows"][0]   # CONFIG: 1R and 2R
+        self.assertEqual((r["target1"], r["target2"]), (None, 375.9))
+        self.write_old_state(1.0)
+        r = loop.load_state(self.state, DAY, loop.rules_from(CONFIG))["rows"][0]
+        self.assertEqual((r["target1"], r["target2"]), (375.9, None))
+
+    def test_an_old_row_with_another_r_keeps_its_target_in_the_verdict(self):
+        self.write_old_state(3.45)
+        r = loop.load_state(self.state, DAY, loop.rules_from(CONFIG))["rows"][0]
+        self.assertEqual((r["target1"], r["target2"]), (None, None))
+        self.assertIn("target 375.90 at 3.45R", r["verdict"])
+        self.assertTrue(r["verdict"].startswith("Strongly toward the stop"))   # the note goes after the verdict
+
+    def test_an_old_row_says_its_odds_are_for_its_old_target(self):
+        self.write_old_state(2.0)   # built at 2R, which is Target 2 under CONFIG (1R / 2R)
+        r = loop.load_state(self.state, DAY, loop.rules_from(CONFIG))["rows"][0]
+        self.assertTrue(r["verdict"].startswith("Strongly toward the stop"))
+        self.assertIn("these odds are for the 2R target (Target 2), not Target 1", r["verdict"])
+        self.assertIn("these odds are for the 2R target", loop.sheet_xml([r], loop.rules_from(CONFIG)))
+        self.write_old_state(1.0)   # built at 1R = Target 1: the odds are for Target 1, nothing to say
+        r = loop.load_state(self.state, DAY, loop.rules_from(CONFIG))["rows"][0]
+        self.assertNotIn("odds are for", r["verdict"])
+
+    def test_the_old_row_note_is_added_once(self):
+        self.write_old_state(2.0)
+        for _ in range(3):
+            doc = loop.load_state(self.state, DAY, loop.rules_from(CONFIG))
+            with open(self.state, "w") as fh:
+                json.dump(doc, fh)
+        self.assertEqual(doc["rows"][0]["verdict"].count("saved before two targets"), 1)
+
+    def test_show_reads_a_row_without_changing_it(self):
+        self.write_old_state(2.0)
+        with open(self.state) as fh:
+            r = json.load(fh)["rows"][0]   # as saved, before any upgrade
+        before = dict(r)
+        text = loop.short_row(r)
+        self.assertEqual(r, before)
+        self.assertIn("Strongly toward the stop", text)
+        self.assertNotIn("(saved before", text)
+
+    def test_show_works_on_rows_saved_before_two_targets(self):
+        self.write_old_state(3.45)
+        lines = []
+        self.assertEqual(loop.main(["show", "--state", self.state], lines.append), 0)
+        self.assertIn("target $375.90 (3.45R)", "\n".join(lines))
+
+    def test_a_row_found_under_other_r_values_says_so_in_the_sheet(self):
+        r = dict(row("TSLA", "Leans toward the target: ..."), entry=364.18, stop=358.32, target1=372.97,
+                 target2=382.35, rr1=1.5, rr2=3.1, qty=8)
+        sheet = loop.sheet_xml([r], {"rr1": 1.78, "rr2": 3.45})
+        self.assertIn("Target 1 (1.78R)", sheet)
+        self.assertIn("this row's targets are 1.5R and 3.1R", sheet)
+        self.assertNotIn("this row's targets", loop.sheet_xml([r], {"rr1": 1.5, "rr2": 3.1}))
+
     def test_a_state_from_another_day_starts_fresh(self):
         old = loop.fresh_state(datetime.date(2026, 10, 16))
         old["rows"].append(row("TSLA", "x"))
@@ -249,6 +344,13 @@ class Refusals(Base):
         self.write_config(cfg)
         code, _, err = self.run_loop("--symbols", "TSLA")
         self.assertIn('needs "max_reward_risk"', err)
+
+    def test_a_config_without_min_reward_risk(self):
+        cfg = dict(CONFIG)
+        del cfg["min_reward_risk"]
+        self.write_config(cfg)
+        code, _, err = self.run_loop("--symbols", "TSLA")
+        self.assertIn('needs "min_reward_risk"', err)
 
     def test_offline_needs_a_clock(self):
         err = io.StringIO()

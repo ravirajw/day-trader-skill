@@ -14,10 +14,12 @@ Every stock that broke out moves to the sheet, once, and is not checked again th
 
   entry   the breakout bar's close
   stop    the opening-range midpoint, (range high + range low) / 2, rounded down
-  target  entry + max_reward_risk x (entry - stop)                       (config)
+  target1 entry + min_reward_risk x (entry - stop), on the price step    (config)
+  target2 entry + max_reward_risk x (entry - stop), on the price step    (config)
   qty     the smaller of  max_loss_per_trade_usd / (entry - stop)  and
                           max_order_usd / entry, rounded down           (config)
-  odds    the Time Machine: 10,000 replays to flat_by, run for the new breakouts in parallel
+  odds    the Time Machine on entry, stop and Target 1: 10,000 replays to flat_by, run for the
+          new breakouts in parallel
 
 Nothing is filtered out. After each run the whole sheet is sorted: "Strongly toward the
 target" on top, then "Leans toward the target", break-even, toward the stop, and rows
@@ -143,7 +145,32 @@ def fresh_state(day):
     return {"created_by": "trader-loop", "date": day.isoformat(), "rows": [], "last_scan": None}
 
 
-def load_state(path, day):
+def upgrade_row(r, rules=None):
+    """A row saved before the sheet had two targets ("target" at "rr", no "target1"): its one target goes
+    under the column whose R it was built at, by the config's rules; otherwise into the verdict, so no
+    price is shown under the wrong R. Its odds were worked out for that old target, so unless that is
+    Target 1 the verdict says so (once: an upgraded row has "target1" and is left alone)."""
+    if "target1" in r:
+        return r
+    t, rr = r.get("target"), r.get("rr")
+    r.update({"target1": None, "target2": None, "rr1": None, "rr2": None})
+    if rules:
+        r["rr1"], r["rr2"] = rules["rr1"], rules["rr2"]
+    if t is None or not rules:
+        return r
+    if rr == rules["rr1"]:
+        r["target1"] = t
+        return r
+    if rr == rules["rr2"]:
+        r["target2"] = t
+        note = "these odds are for the %gR target (Target 2), not Target 1" % rr
+    else:
+        note = "target %.2f at %gR; these odds are for it, not Target 1" % (t, rr)
+    r["verdict"] = (r.get("verdict") or "") + " [saved before two targets: %s]" % note
+    return r
+
+
+def load_state(path, day, rules=None):
     """Today's state, or a fresh one (a file from another day starts over)."""
     if os.path.exists(path):
         try:
@@ -153,6 +180,8 @@ def load_state(path, day):
             raise LoopError("%s is not valid JSON: %s (move it away to start fresh)" % (path, e))
         if isinstance(doc, dict) and doc.get("date") == day.isoformat() and isinstance(doc.get("rows"), list):
             doc.setdefault("last_scan", None)
+            for r in doc["rows"]:
+                upgrade_row(r, rules)
             return doc
     return fresh_state(day)
 
@@ -175,9 +204,13 @@ def _num(cfg, key):
 
 
 def rules_from(cfg):
-    """The three numbers the sheet needs from the config."""
-    return {"max_risk": _num(cfg, "max_loss_per_trade_usd"), "max_amount": _num(cfg, "max_order_usd"),
-            "rr": _num(cfg, "max_reward_risk")}
+    """The four numbers the sheet needs from the config: Target 1 is min_reward_risk R, Target 2 max_reward_risk R."""
+    rules = {"max_risk": _num(cfg, "max_loss_per_trade_usd"), "max_amount": _num(cfg, "max_order_usd"),
+             "rr1": _num(cfg, "min_reward_risk"), "rr2": _num(cfg, "max_reward_risk")}
+    if rules["rr1"] >= rules["rr2"]:
+        raise LoopError('trader/config.json needs "min_reward_risk" (%g) under "max_reward_risk" (%g): they are '
+                        "Target 1 and Target 2" % (rules["rr1"], rules["rr2"]))
+    return rules
 
 
 def qty_for(entry, stop, max_risk, max_amount):
@@ -214,21 +247,25 @@ def plan_row(hit, day, found_at, now_utc, rules, a):
     """The row for one breakout, before the Time Machine: entry, stop, target, qty."""
     sym = hit["symbol"]
     row = {"symbol": sym, "breakout_at": hit["at"], "found_at": found_at, "or_high": hit["or_high"],
-           "or_low": hit["or_low"], "entry": hit["price"], "stop": None, "target": None, "rr": rules["rr"],
+           "or_low": hit["or_low"], "entry": hit["price"], "stop": None, "target1": None, "target2": None,
+           "rr1": rules["rr1"], "rr2": rules["rr2"],
            "qty": None, "limited_by": "", "risk_per_share": None, "max_loss": None, "cost": None,
            "p_target": None, "p_stop": None, "p_neither": None, "verdict": "", "group": FAILED, "lean": 0.0,
            "bar_index": hit["bar_index"]}
     ns = Namespace(from_path=None, symbol=sym, entry=hit["price"], or_high=hit["or_high"], or_low=hit["or_low"],
                    or_minutes=a.or_minutes, setup="orb", date=day.isoformat(), time=hit["at"],
                    entry_bar=hit["bar_index"], interval="5m", side="buy", stop="or-mid",
-                   target="%sR" % ("%g" % rules["rr"]), flat_by=None, config=a.config, offline=None, now=None)
+                   target="%sR" % ("%g" % rules["rr1"]), flat_by=None, config=a.config, offline=None, now=None)
     try:
         plan, _ = ex.build_plan(ns, now_utc)
     except ex.PlanError as e:
         row["verdict"] = "Plan failed: %s" % e
         return row, None
     qty, why = qty_for(plan["entry"], plan["stop"], rules["max_risk"], rules["max_amount"])
-    row.update({"entry": plan["entry"], "stop": plan["stop"], "target": plan["target"],
+    # Target 2 from the same entry and stop, on the price step for its own price (as trader-exit rounds)
+    raw2 = ex.D(plan["entry"]) + ex.D(str(rules["rr2"])) * ex.D(plan["risk_per_share"])
+    target2 = float(ex.to_tick(raw2, ex.tick_size(raw2, sym)))
+    row.update({"entry": plan["entry"], "stop": plan["stop"], "target1": plan["target"], "target2": target2,
                 "risk_per_share": plan["risk_per_share"], "qty": qty, "limited_by": why,
                 "max_loss": round(qty * plan["risk_per_share"], 2), "cost": round(qty * plan["entry"], 2)})
     return row, plan
@@ -265,10 +302,10 @@ def sort_rows(rows):
 COLUMNS = [  # header, key, style, width
     ("Rank", "rank", "int", 6), ("Symbol", "symbol", "text", 15), ("Breakout time", "breakout_at", "text", 13),
     ("Found at", "found_at", "text", 10), ("Range high", "or_high", "price", 11), ("Range low", "or_low", "price", 11),
-    ("Entry", "entry", "price", 11), ("Stop", "stop", "price", 11), ("Target", "target", "price", 11),
-    ("R:R", "rr", "price", 6), ("Qty", "qty", "int", 8), ("Qty limited by", "limited_by", "text", 13),
+    ("Entry", "entry", "price", 11), ("Stop", "stop", "price", 11), ("Target 1", "target1", "price", 15),
+    ("Target 2", "target2", "price", 15), ("Qty", "qty", "int", 8), ("Qty limited by", "limited_by", "text", 13),
     ("Risk/share", "risk_per_share", "price", 11), ("Max loss", "max_loss", "price", 11),
-    ("Cost", "cost", "price", 13), ("Target first", "p_target", "pct", 11), ("Stop first", "p_stop", "pct", 10),
+    ("Cost", "cost", "price", 13), ("Target 1 first", "p_target", "pct", 13), ("Stop first", "p_stop", "pct", 10),
     ("Neither", "p_neither", "pct", 9), ("Verdict", "verdict", "verdict", 90),
 ]
 STYLE = {"text": 0, "header": 1, "price": 2, "int": 3, "pct": 4, "good": 5, "bad": 6, "grey": 7}
@@ -320,7 +357,25 @@ def _cell(ref, value, style):
     return '<c r="%s" s="%d"><v>%s</v></c>' % (ref, style, repr(value) if isinstance(value, float) else value)
 
 
-def sheet_xml(rows):
+def column_heads(rules=None):
+    """The header row: the two target columns carry their R from the config ("Target 1 (1.78R)")."""
+    heads = []
+    for head, key, _, _ in COLUMNS:
+        if rules and key in ("target1", "target2"):
+            head = "%s (%gR)" % (head, rules["rr" + key[-1]])
+        heads.append(head)
+    return heads
+
+
+def other_r_note(r, rules):
+    """A row found while the config had other R values (changed mid-morning) says so in its verdict cell."""
+    if not rules or r.get("rr1") is None or (r.get("rr1"), r.get("rr2")) == (rules["rr1"], rules["rr2"]):
+        return ""
+    return " [this row's targets are %gR and %gR: the config changed after it was found]" % (
+        r["rr1"], r["rr2"] if r.get("rr2") is not None else 0)
+
+
+def sheet_xml(rows, rules=None):
     out = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
            '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" '
@@ -328,7 +383,7 @@ def sheet_xml(rows):
     for i, (_, _, _, w) in enumerate(COLUMNS):
         out.append('<col min="%d" max="%d" width="%d" customWidth="1"/>' % (i + 1, i + 1, w))
     out.append('</cols><sheetData><row r="1">')
-    for i, (head, _, _, _) in enumerate(COLUMNS):
+    for i, head in enumerate(column_heads(rules)):
         out.append(_cell("%s1" % col_letter(i), head, STYLE["header"]))
     out.append("</row>")
     for n, r in enumerate(rows, start=2):
@@ -336,6 +391,7 @@ def sheet_xml(rows):
         for i, (_, key, kind, _) in enumerate(COLUMNS):
             v = n - 1 if key == "rank" else r.get(key)
             if kind == "verdict":
+                v = (v or "") + other_r_note(r, rules)
                 style = STYLE["good"] if r["group"] <= 1 else STYLE["bad"] if r["group"] in (3, 4) else (
                     STYLE["grey"] if r["group"] == FAILED else STYLE["text"])
             else:
@@ -346,7 +402,7 @@ def sheet_xml(rows):
     return "".join(out)
 
 
-def write_xlsx(path, rows, title):
+def write_xlsx(path, rows, title, rules=None):
     files = {
         "[Content_Types].xml":
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -381,7 +437,7 @@ def write_xlsx(path, rows, title):
             'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" '
             'Target="styles.xml"/></Relationships>',
         "xl/styles.xml": STYLES_XML,
-        "xl/worksheets/sheet1.xml": sheet_xml(rows),
+        "xl/worksheets/sheet1.xml": sheet_xml(rows, rules),
     }
     d = os.path.dirname(path)
     if d:
@@ -440,9 +496,13 @@ def short_row(r):
     if r["qty"] is None:
         return "%-14s breakout %s  %s" % (sym, r["breakout_at"], r["verdict"])
     head = r["verdict"].split(":")[0]
-    return "%-14s breakout %-8s entry %s stop %s target %s qty %d  %s" % (
-        sym, r["breakout_at"], scan.money(r["entry"], sym), scan.money(r["stop"], sym),
-        scan.money(r["target"], sym), r["qty"], head)
+    if "target1" not in r and r.get("target") is not None:   # a row saved before two targets, as it is
+        targets = "target %s (%gR)" % (scan.money(r["target"], sym), r.get("rr") or 0)
+    else:
+        targets = "t1 %s t2 %s" % tuple(scan.money(r.get(k), sym) if r.get(k) is not None else "-"
+                                        for k in ("target1", "target2"))
+    return "%-14s breakout %-8s entry %s stop %s %s qty %d  %s" % (
+        sym, r["breakout_at"], scan.money(r["entry"], sym), scan.money(r["stop"], sym), targets, r["qty"], head)
 
 
 def run_once(cutoff, day, symbols, state, rules, clock, a, offline_data, out):
@@ -492,11 +552,11 @@ def keep_awake():
         return None
 
 
-def save(state, a, day):
+def save(state, a, day, rules=None):
     if a.no_write:
         return
     scan.write_json(a.state, state)
-    write_xlsx(a.sheet or SHEET % day.isoformat(), state["rows"], "ORB %s" % day.isoformat())
+    write_xlsx(a.sheet or SHEET % day.isoformat(), state["rows"], "ORB %s" % day.isoformat(), rules)
 
 
 def cmd_run(a, out=print):
@@ -525,7 +585,7 @@ def cmd_run(a, out=print):
         except scan.ScanError as e:
             raise LoopError(str(e))
     symbols = symbols_for(a, day, offline_data)
-    state = load_state(a.state, day)
+    state = load_state(a.state, day, rules)
     sheet = a.sheet or SHEET % day.isoformat()
     if os.path.exists(a.stop_file):
         os.remove(a.stop_file)
@@ -537,12 +597,13 @@ def cmd_run(a, out=print):
             done = None
     sym0 = symbols[0]
     out("Watching %d stock%s for opening-range breakouts on %s: the %d-minute range (9:15 to %s), a run %d s "
-        "after each 5-minute bar closes, %s to %s IST. Target %gR (max_reward_risk); qty by max risk %s and max "
+        "after each 5-minute bar closes, %s to %s IST. Target 1 %gR (min_reward_risk), Target 2 %gR (max_reward_risk); the Time Machine runs on "
+        "Target 1; qty by max risk %s and max "
         "amount %s. %d already in the sheet."
         % (len(symbols), "" if len(symbols) == 1 else "s", scan.day_label(day), a.or_minutes,
            scan.clock_label(scan.slot(day, a.or_minutes // scan.BAR_MIN)), a.delay,
            scan.clock_label(closes[0] + datetime.timedelta(seconds=a.delay)),
-           scan.clock_label(closes[-1] + datetime.timedelta(seconds=a.delay)), rules["rr"],
+           scan.clock_label(closes[-1] + datetime.timedelta(seconds=a.delay)), rules["rr1"], rules["rr2"],
            scan.money(rules["max_risk"], sym0), scan.money(rules["max_amount"], sym0), len(state["rows"])))
     out("Sheet: %s (rewritten after each run: close and reopen it in Excel). Stop: Ctrl+C, or "
         "`python3 loop.py stop` from another terminal." % sheet)
@@ -557,7 +618,7 @@ def cmd_run(a, out=print):
                 run_once(c, day, symbols, state, rules, clock, a, offline_data, out)
                 done = c
                 state["last_scan"] = "%s %s IST" % (day.isoformat(), c.strftime("%H:%M"))
-                save(state, a, day)
+                save(state, a, day, rules)
                 if len(moved(state)) >= len(symbols):
                     reason = "every stock on the list broke out"
                     break
@@ -576,7 +637,7 @@ def cmd_run(a, out=print):
             awake.terminate()
         if os.path.exists(a.stop_file):
             os.remove(a.stop_file)
-        save(state, a, day)
+        save(state, a, day, rules)
     out("Loop ended: %s. %d of %d stocks broke out and are in the sheet. %s"
         % (reason, len(moved(state)), len(symbols), NOTE))
     if not a.no_write:

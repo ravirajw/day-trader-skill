@@ -12,7 +12,7 @@ description: >-
   trader-news and trader-entry. A loop (loop.py) re-checks the daily list
   one minute after every 5-minute bar, 9:36 to 10:56 AM IST, and puts every
   breakout into a sorted Excel sheet (trader/orb-YYYY-MM-DD.xlsx) with entry,
-  stop, target, quantity and the Time Machine's odds. Free Yahoo data,
+  stop, Target 1 and Target 2, quantity and the Time Machine's odds. Free Yahoo data,
   bar by bar. Use when the user says "scan the market", "find me setups",
   "what is breaking out", "opening range breakouts", "scan for bull flags",
   "oversold stocks", "pre-market scan", "build my watchlist", "what should I
@@ -165,13 +165,20 @@ Each row:
 | --- | --- |
 | Entry | the breakout bar's close |
 | Stop | the opening-range midpoint, (range high + range low) / 2, rounded down |
-| Target | entry + `max_reward_risk` x (entry - stop), from the config (2 gives a 2R target) |
+| Target 1 | entry + `min_reward_risk` x (entry - stop), from the config (1.78 gives a 1.78R target); the header shows the R |
+| Target 2 | entry + `max_reward_risk` x (entry - stop), from the config (3.45 gives a 3.45R target); the header shows the R |
 | Qty | the smaller of `max_loss_per_trade_usd` / (entry - stop) and `max_order_usd` / entry, rounded down; "Qty limited by" says which |
 | Max loss, Cost | qty x (entry - stop), qty x entry |
-| Target first, Stop first, Neither, Verdict | the Time Machine: 10,000 replays to `flat_by`, run for a run's new breakouts in parallel (4 at a time, `--workers`) |
+| Target 1 first, Stop first, Neither, Verdict | the Time Machine on entry, stop and **Target 1**: 10,000 replays to `flat_by`, run for a run's new breakouts in parallel (4 at a time, `--workers`) |
 
-Nothing is filtered out. After every run the whole sheet is re-sorted:
-"Strongly toward the target" on top, then "Leans toward the target",
+Both targets land on the price step for their own price (NSE's band for `.NS`
+stocks, a cent for US stocks), the same rounding trader-exit uses. The loop
+needs `min_reward_risk` under `max_reward_risk` in the config and stops with
+a message otherwise. Orders are not built from the sheet: trader-exit,
+trader-budget and trader-risk still plan one target.
+
+Nothing is filtered out. After every run the whole sheet is re-sorted by the
+Time Machine verdict for Target 1: "Strongly toward the target" on top, then "Leans toward the target",
 break-even, toward the stop, and rows whose Time Machine failed (Yahoo error,
 too little history) at the bottom with the reason. A failure is not retried.
 Within one verdict the clearer lean ranks higher, then the earlier breakout.
@@ -195,8 +202,9 @@ Within one verdict the clearer lean ranks higher, then the earlier breakout.
   FOLDER --now "2026-10-19 09:30" --symbols TSLA` runs the morning on a
   simulated clock (`FOLDER` holds `<SYM>-60d5m.json`). On the reel's session
   on the NSE clock, TSLA breaks out on the 10:00 bar: entry 364.18, stop
-  358.32, target 375.90 at 2R, and the Time Machine says "Strongly toward the
-  stop".
+  358.32, Target 1 370.04 at 1R and Target 2 375.90 at 2R (the reel's config:
+  `min_reward_risk` 1, `max_reward_risk` 2), and the Time Machine on Target 1
+  says "Close to a coin flip" (target first about 27 %, stop first about 23 %).
 
 ## Data and limits
 
