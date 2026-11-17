@@ -328,6 +328,175 @@ class Commands(Base):
         self.assertEqual(loop.load_state(self.state, DAY)["rows"], [])
 
 
+def wall_with_a_gap(symbol, hhmm):
+    """The recorded wall with one bar of `symbol` blanked (Yahoo sometimes leaves a bar empty)."""
+    import gzip
+    with gzip.open(WALL, "rt") if WALL.endswith(".gz") else open(WALL) as fh:
+        doc = json.load(fh)
+    r = doc[symbol]["chart"]["result"][0]
+    q = r["indicators"]["quote"][0]
+    for i, t in enumerate(r["timestamp"]):
+        if (DT.utcfromtimestamp(t) + datetime.timedelta(hours=5, minutes=30)).strftime("%H:%M") == hhmm:
+            for k in q:
+                q[k][i] = None
+    path = os.path.join(NSE_DIR, "gap-%s-%s.json" % (symbol, hhmm.replace(":", "")))
+    with open(path, "w") as fh:
+        json.dump(doc, fh)
+    return path
+
+
+class Force(Base):
+    def run_with(self, wall, *extra, **kw):
+        argv = ["run", "--offline", wall, "--tm-offline", TM_DIR, "--now", kw.get("now", "2026-10-19 13:00"),
+                "--config", self.cfg, "--state", self.state, "--sheet", self.sheet, "--stop-file", self.stop,
+                "--replays", "2000"] + list(extra)
+        lines, err = [], io.StringIO()
+        with redirect_stderr(err):
+            code = loop.main(argv, lines.append)
+        return code, "\n".join(lines), err.getvalue()
+
+    def test_force_finds_a_breakout_before_a_later_gap(self):
+        # TSLA breaks out on the 10:00 bar and its 10:05 bar is empty: the morning loop finds it at 10:01,
+        # and so must --force, which replays every bar from 9:36 up to the last run in one go
+        gap = wall_with_a_gap("TSLA", "10:05")
+        code, text, _ = self.run_with(gap, "--symbols", "TSLA", "--force", "--last-run", "10:11")
+        self.assertEqual(code, 0)
+        t = self.saved()["rows"][0]
+        self.assertEqual((t["symbol"], t["breakout_at"], t["found_at"], t["entry"]), ("TSLA", "10:00 AM", "10:01 AM", 364.18))
+
+    def test_force_live_reads_each_full_chart_not_the_closes_only_spark(self):
+        # live (no --offline): Yahoo's spark answer has closes only, which cannot show a break of the range
+        # high; --force must read each stock's full 5-minute chart, as the live loop's confirm step does
+        import gzip
+        with gzip.open(WALL, "rt") if WALL.endswith(".gz") else open(WALL) as fh:
+            wall = json.load(fh)
+        asked = []
+
+        def fake_get(path, *args, **kw):
+            asked.append(path)
+            if "/spark" in path:
+                raise AssertionError("--force must not use the closes-only spark answer")
+            sym = path.split("/v8/finance/chart/")[1].split("?")[0]
+            return json.dumps(wall[sym])
+        for name, value in (("yahoo_get", fake_get), ("SLEEP", lambda s: None)):
+            self.addCleanup(setattr, loop.scan, name, getattr(loop.scan, name))
+            setattr(loop.scan, name, value)
+        argv = ["run", "--tm-offline", TM_DIR, "--now", "2026-10-19 13:00", "--config", self.cfg, "--state",
+                self.state, "--sheet", self.sheet, "--stop-file", self.stop, "--replays", "2000",
+                "--symbols", "TSLA,MSFT", "--force", "--last-run", "10:11"]
+        lines = []
+        with redirect_stderr(io.StringIO()):
+            code = loop.main(argv, lines.append)
+        self.assertEqual(code, 0)
+        self.assertEqual(sorted(r["symbol"] for r in self.saved()["rows"]), ["MSFT", "TSLA"])
+        self.assertEqual(len(asked), 2)                                # one chart per stock, once
+
+    def test_a_failed_check_leaves_todays_sheet_alone(self):
+        self.run_loop("--symbols", "TSLA,MSFT")
+        before = open(self.state).read()
+        real = loop.scan_once
+
+        def broken(*args, **kw):
+            raise loop.scan.ScanError("Yahoo timed out")
+        loop.scan_once = broken
+        self.addCleanup(setattr, loop, "scan_once", real)
+        code, text, err = self.run_loop("--symbols", "TSLA,MSFT", "--force", "--last-run", "10:11",
+                                        now="2026-10-19 13:00")
+        self.assertEqual(code, 1)
+        self.assertIn("check failed: Yahoo timed out", text)
+        self.assertIn("Today's sheet was left as it was", err)
+        self.assertEqual(open(self.state).read(), before)
+
+    def test_ctrl_c_leaves_todays_sheet_alone(self):
+        self.run_loop("--symbols", "TSLA,MSFT")
+        before = open(self.state).read()
+        real = loop.run_tm
+
+        def interrupted(*args, **kw):
+            raise KeyboardInterrupt()
+        loop.run_tm = interrupted
+        self.addCleanup(setattr, loop, "run_tm", real)
+        code, text, _ = self.run_loop("--symbols", "TSLA,MSFT", "--force", "--last-run", "10:11",
+                                      now="2026-10-19 13:00")
+        self.assertEqual(open(self.state).read(), before)
+        self.assertIn("left as it was", text)
+
+    def test_force_leaves_a_stop_request_for_another_loop(self):
+        with open(self.stop, "w") as fh:
+            fh.write("stop")
+        self.run_loop("--symbols", "TSLA", "--force", "--last-run", "10:11", now="2026-10-19 13:00")
+        self.assertTrue(os.path.exists(self.stop))
+
+    def test_force_with_a_last_run_before_the_first_run(self):
+        code, _, err = self.run_loop("--symbols", "TSLA", "--force", "--last-run", "09:30", now="2026-10-19 13:00")
+        self.assertEqual(code, 1)
+        self.assertIn("--last-run 09:30 is before the first run (9:36 AM)", err)
+
+    def test_force_says_it_is_one_rebuild(self):
+        code, text, _ = self.run_loop("--symbols", "TSLA", "--force", "--last-run", "10:11", now="2026-10-19 13:00")
+        self.assertIn("--force: rebuilding today's sheet in one go", text)
+        self.assertNotIn("Stop: Ctrl+C", text)
+
+    def test_force_after_the_last_run_builds_the_morning_sheet_in_one_run(self):
+        # 1 PM: a normal run refuses (after the last run); --force checks once, on the newest bar up to the
+        # last run. The recorded day ends at 10:15 AM, so the last run here is 10:11 (the 10:10 bar).
+        code, _, err = self.run_loop("--symbols", "TSLA,MSFT", now="2026-10-19 13:00")
+        self.assertIn("after the last run (10:56)", err)
+        code, text, _ = self.run_loop("--symbols", "TSLA,MSFT", "--force", "--last-run", "10:11",
+                                      now="2026-10-19 13:00")
+        self.assertEqual(code, 0)
+        self.assertIn("9:36 AM run (9:35 AM bar)", text)               # replayed bar by bar, in one go
+        self.assertIn("--force rebuilt today's sheet, runs 9:36 AM to 10:11 AM", text)
+        rows = self.saved()["rows"]
+        self.assertEqual(sorted(r["symbol"] for r in rows), ["MSFT", "TSLA"])
+        t = [r for r in rows if r["symbol"] == "TSLA"][0]
+        self.assertEqual((t["breakout_at"], t["found_at"], t["entry"], t["target1"], t["target2"]),
+                         ("10:00 AM", "10:01 AM", 364.18, 370.04, 375.9))   # as the morning loop found it
+        self.assertTrue(os.path.exists(self.sheet))
+
+    def test_force_starts_fresh_and_overwrites_the_saved_state(self):
+        old = loop.fresh_state(DAY)
+        old["last_scan"] = "2026-10-19 10:55 IST"
+        old["rows"].append(dict(row("TSLA", "Strongly toward the stop: old"), target1=1.0, target2=2.0, rr1=1.0,
+                                rr2=2.0, entry=1.0, stop=0.5, qty=1))
+        with open(self.state, "w") as fh:
+            json.dump(old, fh)
+        code, _, _ = self.run_loop("--symbols", "TSLA", "--force", "--last-run", "10:11", now="2026-10-19 13:00")
+        self.assertEqual(code, 0)
+        rows = self.saved()["rows"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["entry"], 364.18)                     # the fresh row, not the saved one
+        self.assertNotIn("old", rows[0]["verdict"])
+
+    def test_force_with_the_default_last_run_checks_the_10_55_bar(self):
+        code, text, _ = self.run_loop("--symbols", "TSLA", "--force", now="2026-10-19 13:00")
+        self.assertEqual(code, 0)                       # found at 10:01, before the recorded day runs out at 10:15
+        self.assertEqual(self.saved()["rows"][0]["found_at"], "10:01 AM")
+        self.assertIn("runs 9:36 AM to 10:56 AM", text)
+
+    def test_force_counts_only_bars_up_to_the_last_run(self):
+        # TSLA breaks out on the 10:00 bar: with the last run at 9:56 it is not found
+        code, text, _ = self.run_loop("--symbols", "TSLA", "--force", "--last-run", "09:56", now="2026-10-19 13:00")
+        self.assertEqual(code, 1)                                      # an empty sheet ends with 1, as a normal run does
+        self.assertIn("(9:55 AM bar)", text)
+        self.assertEqual(self.saved()["rows"], [])
+
+    def test_force_during_the_morning_checks_the_newest_closed_bar(self):
+        code, text, _ = self.run_loop("--symbols", "TSLA", "--force", now="2026-10-19 10:07")
+        self.assertEqual(code, 0)
+        self.assertIn("runs 9:36 AM to 10:06 AM", text)               # up to the newest closed bar, 10:05
+        self.assertNotIn("(10:10 AM bar)", text)
+
+    def test_force_before_the_first_run_has_nothing_to_check(self):
+        code, _, err = self.run_loop("--symbols", "TSLA", "--force", now="2026-10-19 09:33")
+        self.assertEqual(code, 1)
+        self.assertIn("nothing to check yet", err)
+
+    def test_force_still_needs_a_trading_day(self):
+        code, _, err = self.run_loop("--symbols", "TSLA", "--force", now="2026-10-17 13:00")
+        self.assertIn("No session on Sat 2026-10-17", err)
+
+
 class Refusals(Base):
     def test_no_session_on_a_weekend(self):
         code, _, err = self.run_loop("--symbols", "TSLA", now="2026-10-17 09:30")

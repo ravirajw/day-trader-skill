@@ -3,6 +3,7 @@
 
     python3 loop.py run                     # runs 9:36 to 10:56 AM IST, one a 5-minute bar
     python3 loop.py run --last-run 11:31    # a later last run
+    python3 loop.py run --force             # rebuild today's sheet now, even after 10:56 (runs 9:36 to 10:56 in one go)
     python3 loop.py stop                    # from another terminal: stop the running loop
     python3 loop.py show                    # today's sheet, sorted, in the terminal
     python3 loop.py run --offline wall5m.json.gz --tm-offline FOLDER --now "2026-10-19 09:30" --symbols TSLA
@@ -477,6 +478,19 @@ def symbols_for(a, day, offline_data):
     return out
 
 
+def fetch_charts(symbols):
+    """Today's full 5-minute chart for each stock, one request each. -> ({SYM: series}, {SYM: error})."""
+    data, failed = {}, {}
+    for i, sym in enumerate(symbols):
+        if i:
+            scan.SLEEP(scan.PAUSE)
+        try:
+            data[sym] = scan.parse_chart(scan.yahoo_get(scan.chart_path(sym, "1d", "%dm" % scan.BAR_MIN)), sym)
+        except scan.ScanError as e:
+            failed[sym] = str(e)
+    return data, failed
+
+
 def scan_once(cutoff, day, pending, a, offline_data):
     """Breakout hits among `pending` by `cutoff` (naive IST), oldest first, and the scan counts."""
     if offline_data is not None:
@@ -516,7 +530,7 @@ def run_once(cutoff, day, symbols, state, rules, clock, a, offline_data, out):
         hits, counts, _ = scan_once(cutoff, day, pending, a, offline_data)
     except scan.ScanError as e:
         out("%s  check failed: %s (trying again at the next run)" % (found_at, e))
-        return []
+        return None  # a failed check, not "no breakouts": --force stops on it
     now_utc = clock.now()
     planned = [plan_row(h, day, found_at, now_utc, rules, a) for h in hits]
     if planned:
@@ -575,7 +589,18 @@ def cmd_run(a, out=print):
     if not ok:
         raise LoopError("No session on %s (%s): the market is closed. Nothing to watch." % (scan.day_label(day), why))
     closes = bar_closes(day, a.or_minutes, last_run, a.delay)
-    if not closes or now_ist > closes[-1] + datetime.timedelta(seconds=a.delay):
+    forced = None
+    if a.force:  # rebuild now: every run from the first up to the newest due one, in one go, into a fresh sheet
+        first_run = scan.slot(day, a.or_minutes // scan.BAR_MIN) + datetime.timedelta(
+            minutes=scan.BAR_MIN, seconds=a.delay)
+        if not closes:
+            raise LoopError("--last-run %s is before the first run (%s): nothing to check with --force."
+                            % (last_run.strftime("%H:%M"), scan.clock_label(first_run)))
+        forced = [c for c in closes if c + datetime.timedelta(seconds=a.delay) <= now_ist]
+        if not forced:
+            raise LoopError("It is %s IST: nothing to check yet with --force, the first run is at %s."
+                            % (scan.clock_label(now_ist), scan.clock_label(first_run)))
+    elif not closes or now_ist > closes[-1] + datetime.timedelta(seconds=a.delay):
         raise LoopError("It is %s IST, after the last run (%s). Run it on the next trading day from 9:15."
                         % (scan.clock_label(now_ist), last_run.strftime("%H:%M")))
     offline_data = None
@@ -585,9 +610,19 @@ def cmd_run(a, out=print):
         except scan.ScanError as e:
             raise LoopError(str(e))
     symbols = symbols_for(a, day, offline_data)
-    state = load_state(a.state, day, rules)
+    if forced and offline_data is None:
+        # one download of each stock's full 5-minute chart (highs and lows: Yahoo's quicker spark answer has
+        # closes only), replayed bar by bar: a later gap cannot hide an earlier breakout, and a failed
+        # download stops here, before today's sheet is touched
+        offline_data, failed = fetch_charts(symbols)
+        if not offline_data:
+            raise LoopError("--force: no charts came back for %d stocks. Today's sheet was left as it was."
+                            % len(symbols))
+        if failed:
+            out("--force: no chart for %s; left out of the sheet." % ", ".join(sorted(failed)))
+    state = fresh_state(day) if forced else load_state(a.state, day, rules)  # --force overwrites today's
     sheet = a.sheet or SHEET % day.isoformat()
-    if os.path.exists(a.stop_file):
+    if os.path.exists(a.stop_file) and not forced:  # a stop request belongs to a running loop
         os.remove(a.stop_file)
     done = None
     if state.get("last_scan"):
@@ -596,7 +631,16 @@ def cmd_run(a, out=print):
         except ValueError:
             done = None
     sym0 = symbols[0]
-    out("Watching %d stock%s for opening-range breakouts on %s: the %d-minute range (9:15 to %s), a run %d s "
+    if forced:
+        out("--force: rebuilding today's sheet in one go for %d stock%s on %s, replaying the runs from %s to %s "
+            "IST. Target 1 %gR (min_reward_risk), Target 2 %gR (max_reward_risk); the Time Machine runs on "
+            "Target 1. Today's sheet and %s are overwritten when it finishes."
+            % (len(symbols), "" if len(symbols) == 1 else "s", scan.day_label(day),
+               scan.clock_label(forced[0] + datetime.timedelta(seconds=a.delay)),
+               scan.clock_label(forced[-1] + datetime.timedelta(seconds=a.delay)), rules["rr1"], rules["rr2"],
+               a.state))
+    else:
+        out("Watching %d stock%s for opening-range breakouts on %s: the %d-minute range (9:15 to %s), a run %d s "
         "after each 5-minute bar closes, %s to %s IST. Target 1 %gR (min_reward_risk), Target 2 %gR (max_reward_risk); the Time Machine runs on "
         "Target 1; qty by max risk %s and max "
         "amount %s. %d already in the sheet."
@@ -605,13 +649,26 @@ def cmd_run(a, out=print):
            scan.clock_label(closes[0] + datetime.timedelta(seconds=a.delay)),
            scan.clock_label(closes[-1] + datetime.timedelta(seconds=a.delay)), rules["rr1"], rules["rr2"],
            scan.money(rules["max_risk"], sym0), scan.money(rules["max_amount"], sym0), len(state["rows"])))
-    out("Sheet: %s (rewritten after each run: close and reopen it in Excel). Stop: Ctrl+C, or "
-        "`python3 loop.py stop` from another terminal." % sheet)
-    awake = None if sim or a.no_caffeinate else keep_awake()
+        out("Sheet: %s (rewritten after each run: close and reopen it in Excel). Stop: Ctrl+C, or "
+            "`python3 loop.py stop` from another terminal." % sheet)
+    awake = None if sim or a.no_caffeinate or forced else keep_awake()
     stopped = lambda: os.path.exists(a.stop_file)
     reason = "the %s run was the last" % last_run.strftime("%H:%M")
+    finished = not forced  # a --force rebuild is saved only when it finishes
     try:
-        while True:
+        if forced:
+            for c in forced:
+                if run_once(c, day, symbols, state, rules, clock, a, offline_data, out) is None:
+                    raise LoopError("--force stopped: the %s check failed (above). Today's sheet was left as "
+                                    "it was." % scan.clock_label(c))
+                state["last_scan"] = "%s %s IST" % (day.isoformat(), c.strftime("%H:%M"))
+                if len(moved(state)) >= len(symbols):
+                    break
+            finished = True
+            reason = "--force rebuilt today's sheet, runs %s to %s" % (
+                scan.clock_label(forced[0] + datetime.timedelta(seconds=a.delay)),
+                scan.clock_label(forced[-1] + datetime.timedelta(seconds=a.delay)))
+        while not forced:
             now_ist = scan.to_ist(clock.now())
             c = due(closes, now_ist, a.delay, done)
             if c is not None:
@@ -635,9 +692,13 @@ def cmd_run(a, out=print):
     finally:
         if awake is not None:
             awake.terminate()
-        if os.path.exists(a.stop_file):
+        if os.path.exists(a.stop_file) and not forced:
             os.remove(a.stop_file)
-        save(state, a, day, rules)
+        if finished:
+            save(state, a, day, rules)
+    if not finished:
+        out("--force %s before it finished: today's sheet was left as it was." % reason)
+        return 1
     out("Loop ended: %s. %d of %d stocks broke out and are in the sheet. %s"
         % (reason, len(moved(state)), len(symbols), NOTE))
     if not a.no_write:
@@ -695,6 +756,10 @@ def main(argv=None, out=print):
                                                         "(a file, or a folder of <SYM>-60d5m.json)")
     p.add_argument("--no-write", action="store_true")
     p.add_argument("--no-caffeinate", action="store_true", help="do not keep the Mac awake")
+    p.add_argument("--force", action="store_true",
+                   help="rebuild today's sheet now, even after --last-run: one download, then every run from 9:36 "
+                        "to --last-run replayed in one go; today's trader/loop.json and sheet are overwritten when "
+                        "it finishes (a failure or Ctrl+C leaves them as they were)")
     p = sub.add_parser("stop", help="stop a running loop")
     p.add_argument("--stop-file", default=STOP)
     p = sub.add_parser("show", help="today's sheet, sorted, in the terminal")

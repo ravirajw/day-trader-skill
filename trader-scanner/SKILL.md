@@ -41,6 +41,7 @@ python3 "${CLAUDE_SKILL_DIR}/scan.py" orb                            # after 9:3
 python3 "${CLAUDE_SKILL_DIR}/scan.py" orb --at 10:15                 # cut the clock at 10:15 AM IST
 python3 "${CLAUDE_SKILL_DIR}/scan.py" orb --symbols RELIANCE.NS,TCS.NS --json        # or any other list
 python3 "${CLAUDE_SKILL_DIR}/loop.py" run                            # 9:36 to 10:56 AM: every breakout -> trader/orb-YYYY-MM-DD.xlsx
+python3 "${CLAUDE_SKILL_DIR}/loop.py" run --force                    # rebuild today's sheet now, even after 10:56: the 9:36 to 10:56 runs replayed in one go
 python3 "${CLAUDE_SKILL_DIR}/loop.py" stop                           # from another terminal: stop the loop
 python3 "${CLAUDE_SKILL_DIR}/loop.py" show                           # today's sheet, sorted, in the terminal
 ```
@@ -194,6 +195,20 @@ Within one verdict the clearer lean ranks higher, then the earlier breakout.
 - **Nothing is placed and nothing is capped by count.** Choosing rows and
   placing orders is the user's job; each row is sized on its own, so the costs
   of several rows can add up past the cash.
+- **Rebuild today's sheet now (`--force`):** `loop.py run --force` rebuilds
+  today's sheet straight away, at any time of the trading day, even after
+  10:56. It downloads each stock's full 5-minute chart once (highs and lows,
+  not the closes-only quick answer), then replays every run from 9:36 to
+  `--last-run` (10:56 by default) in one go, bar by bar, exactly as the
+  morning loop would have: same breakout bars, same "Found at" times, and a
+  missing bar later in the morning cannot hide an earlier breakout. Today's
+  `trader/orb-YYYY-MM-DD.xlsx` and `trader/loop.json` are overwritten only
+  when the rebuild finishes; a failed download, a failed check or Ctrl+C
+  leaves them as they were. It does not touch a stop request (`loop.py stop`)
+  meant for a loop running in another terminal. The sheet shows the
+  morning's breakout prices and odds, not the current price: check the live
+  price before placing anything. Before the first run (9:36 AM) there is
+  nothing to check and it says so.
 - **Stopping:** Ctrl+C, or `loop.py stop` from another terminal (it writes
   `trader/loop.stop`).
 - **Awake:** on a Mac it runs `caffeinate` while it works (`--no-caffeinate`
