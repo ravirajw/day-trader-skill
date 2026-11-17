@@ -815,7 +815,7 @@ def read_symbols(a, offline_syms=None, daily_list=None, day=None):
                             "Run /trader-scanner orb --symbols ... to scan stocks of your own choice."
                             % (daily_list, doc.get("as_of")))
     elif not a.universe and read_config(getattr(a, "config", None)).get("watchlist"):
-        syms = symbols_from_file(read_config(a.config)["watchlist"])  # your own list beats the US universe
+        syms = symbols_from_file(find_watchlist(read_config(a.config)["watchlist"], a.config))  # beats the US universe
     else:
         path = a.universe or DEFAULT_UNIVERSE
         if not os.path.exists(path):
@@ -850,6 +850,24 @@ def symbols_from_file(path):
         if ln and not ln.startswith("#"):
             out.append(ln.split("|")[0].strip().upper())
     return out
+
+
+def find_watchlist(name, config_path=None):
+    """Where the config's "watchlist" file is. A bare name like "nifty50.txt" is looked for in
+    the folder you run in, then next to the config (trader/) and the folder that holds it, then
+    in trader-scanner/ where the shipped lists live. A path with a folder in it is used as given."""
+    if os.path.isabs(name) or os.path.dirname(name):
+        return name
+    places = [name]
+    if config_path:
+        cdir = os.path.dirname(os.path.abspath(config_path))
+        places += [os.path.join(cdir, name), os.path.join(os.path.dirname(cdir), name)]
+    places.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), name))
+    for p in places:
+        if os.path.exists(p):
+            return p
+    raise ScanError('no watchlist file "%s" (the config\'s "watchlist"); looked in: %s'
+                    % (name, ", ".join(dict.fromkeys(os.path.abspath(p) for p in places))))
 
 
 def read_config(path):

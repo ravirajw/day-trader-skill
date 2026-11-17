@@ -9,7 +9,7 @@ import unittest
 import urllib.error
 from contextlib import redirect_stdout, redirect_stderr
 
-from _load import load, FIX
+from _load import load, ROOT, FIX
 from _nse import nse_copy
 
 scan = load("trader-scanner", "scan")
@@ -644,6 +644,42 @@ class Cli(unittest.TestCase):
         code, text, _ = run(["daily", "--offline", DAILY, "--limit", "3", "--now", "2026-10-19 09:00", "--json",
                              "--no-write", "--min-volume", "0"])
         self.assertEqual(json.loads(text)["universe"], 3)
+
+    def test_config_watchlist_is_found_from_any_folder(self):
+        here = os.getcwd()
+        proj = os.path.join(self.d, "proj")
+        os.makedirs(os.path.join(proj, "trader"))
+        cfg = os.path.join(proj, "trader", "config.json")
+        elsewhere = os.path.join(self.d, "elsewhere")
+        os.makedirs(elsewhere)
+        shipped = os.path.join(ROOT, "trader-scanner", "nifty50.txt")
+        try:
+            os.chdir(elsewhere)
+            # nothing copied anywhere: the list that ships with the scanner is used
+            self.assertEqual(os.path.abspath(scan.find_watchlist("nifty50.txt", cfg)), shipped)
+            # a copy in the project folder (next to trader/) beats the shipped one
+            mine = os.path.join(proj, "nifty50.txt")
+            with open(mine, "w") as fh:
+                fh.write("SBIN.NS\n")
+            self.assertEqual(scan.find_watchlist("nifty50.txt", cfg), mine)
+            # one next to the config beats that
+            inside = os.path.join(proj, "trader", "nifty50.txt")
+            with open(inside, "w") as fh:
+                fh.write("TCS.NS\n")
+            self.assertEqual(scan.find_watchlist("nifty50.txt", cfg), inside)
+            # one in the folder you run in beats them all (what happened before)
+            with open("nifty50.txt", "w") as fh:
+                fh.write("INFY.NS\n")
+            self.assertEqual(scan.find_watchlist("nifty50.txt", cfg), "nifty50.txt")
+            # a missing list says every place it looked
+            with self.assertRaises(scan.ScanError) as e:
+                scan.find_watchlist("missing.txt", cfg)
+            self.assertIn("looked in", str(e.exception))
+            self.assertIn(os.path.join(proj, "trader", "missing.txt"), str(e.exception))
+            # a path with a folder is used as given
+            self.assertEqual(scan.find_watchlist("lists/x.txt", cfg), "lists/x.txt")
+        finally:
+            os.chdir(here)
 
     def test_daily_json(self):
         code, text, _ = run(["daily", "--offline", DAILY, "--now", "2026-10-19 09:00", "--json", "--no-write",

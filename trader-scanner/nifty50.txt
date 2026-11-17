@@ -1,3 +1,6 @@
+# Nifty 50 members, as of 17 Nov 2026 (the day this list was made).
+# NSE reviews the index every March and September: check this list against
+# nseindia.com after each review and update it, or the scanner keeps old names.
 ADANIENT.NS
 ADANIPORTS.NS
 APOLLOHOSP.NS

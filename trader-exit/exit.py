@@ -10,7 +10,7 @@ It never places an order.
     python3 exit.py plan --symbol NVDA --entry 190.25 --setup level --stop pct:1
     python3 exit.py show                                    # the current trader/plan.json
 
-Stops (a long's stop rounds DOWN to the cent, away from the entry):
+Stops (a long's stop rounds DOWN to the price step - a cent, or NSE's step for .NS - away from the entry):
   or-mid     the opening-range midpoint (the default for an orb entry)
   or-low     the opening-range low
   price:X    your price
@@ -20,7 +20,7 @@ Stops (a long's stop rounds DOWN to the cent, away from the entry):
              bars by then it averages all of them and says so.
   A level setup has no opening-range default: give a stop.
 
-Targets (round half up to the cent):
+Targets (round half up to the nearest price step):
   2R (default), 1R, 1.5R ...   entry + R x risk, where risk = entry - stop
   price:X                      your price
 
@@ -180,14 +180,31 @@ def D(x, what="a number"):
         raise PlanError("%s is not a number: %r" % (what, x))
 
 
+# NSE price steps (tick sizes) for stocks, by share price, from NSE circular CMTR67133 (15 Apr 2025).
+# NSE reviews these monthly from each stock's closing price; this uses the price in hand, so a stock
+# sitting right on a band edge (250, 1,000, 5,000 ...) can be one step off. US stocks trade in cents.
+NSE_TICKS = ((250, "0.01"), (1000, "0.05"), (5000, "0.10"), (10000, "0.50"), (20000, "1.00"), (None, "5.00"))
+
+
+def tick_size(price, sym=""):
+    """The smallest price step: NSE's band for .NS stocks, a cent otherwise."""
+    if not is_nse(sym):
+        return CENT
+    p = D(price)
+    for top, step in NSE_TICKS:
+        if top is None or p < top:
+            return Decimal(step)
+
+
+def to_tick(x, tick, rounding=ROUND_HALF_UP):
+    """Round to a whole number of ticks: half up by default (a target), ROUND_FLOOR for a long's stop."""
+    tick = D(tick)
+    return ((D(x) / tick).quantize(Decimal(1), rounding=rounding) * tick).quantize(CENT)
+
+
 def cents(x):
     """Round half up to the cent."""
     return D(x).quantize(CENT, rounding=ROUND_HALF_UP)
-
-
-def floor_cents(x):
-    """A long's stop: round down, away from the entry."""
-    return D(x).quantize(CENT, rounding=ROUND_FLOOR)
 
 
 def money(x):
@@ -246,8 +263,10 @@ def r_label(r):
 
 
 def compute(entry, stop_rule, stop_param, target_rule, target_param, or_high=None, or_low=None,
-            atr=None, atr_bars=None):
-    """The stop, the target and the risk, in exact cents. Raises PlanError with the reason."""
+            atr=None, atr_bars=None, sym=""):
+    """The stop, the target and the risk, each on the price step for its own price (a cent, or NSE's
+    band for a .NS `sym`): the stop rounded down, the target to the nearest step. Raises PlanError
+    with the reason."""
     e = cents(entry)
     if e <= 0:
         raise PlanError("the entry price must be above $0")
@@ -280,7 +299,7 @@ def compute(entry, stop_rule, stop_param, target_rule, target_param, or_high=Non
             num(a.quantize(Decimal("0.0001"))), atr_bars, " (fewer than 14 so far)" if atr_bars < ATR_BARS else "")
     else:
         raise PlanError("unknown stop rule %r" % stop_rule)
-    stop = floor_cents(raw)
+    stop = to_tick(raw, tick_size(raw, sym), ROUND_FLOOR)
     if stop != D(raw):
         detail = (detail + ", rounded down" if detail else "$%s rounded down" % num(raw))
     if stop >= e:
@@ -295,10 +314,11 @@ def compute(entry, stop_rule, stop_param, target_rule, target_param, or_high=Non
                         "survive the spread, normal wiggle would stop you out. Widen it."
                         % (money(risk), money(floor_risk.quantize(CENT, rounding=ROUND_HALF_UP)), money(e)))
     if target_rule == "r":
-        target = cents(e + target_param * risk)
+        raw_t = e + target_param * risk
+        target = to_tick(raw_t, tick_size(raw_t, sym))
         t_label = r_label(target_param)
     else:
-        target = cents(target_param)
+        target = to_tick(target_param, tick_size(target_param, sym))
         t_label = None
     if target <= e:
         raise PlanError("the target %s is at or below the entry %s: a long's target goes above it"
@@ -580,7 +600,7 @@ def build_plan(a, now_utc):
         atr, atr_n = atr_of(bars)
     try:
         c = compute(info["entry"], stop_rule, stop_param, target_rule, target_param, info["or_high"], info["or_low"],
-                    atr, atr_n)
+                    atr, atr_n, info["symbol"])
     except PlanError as e:
         raise PlanError(rupees(str(e), info["symbol"]))
     for k in ("stop_label", "stop_detail", "target_label"):

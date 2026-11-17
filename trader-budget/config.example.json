@@ -1,11 +1,12 @@
 {
+  "_note": "Money settings ending in _usd are in your trading currency, whatever the name says: rupees for NSE (.NS) stocks, dollars for US stocks. Nothing is converted.",
   "budget": 100000,
   "cash_buffer_pct": 10,
   "max_position_pct": 30,
   "max_order_usd": 30000,
   "min_order_usd": 5,
   "max_loss_per_trade_usd": 900,
-  "max_daily_loss_usd": 3000,
+  "max_daily_loss_usd": 2700,
   "max_trades_per_day": 3,
   "max_orders_per_day": 10,
   "min_reward_risk": 1.78,

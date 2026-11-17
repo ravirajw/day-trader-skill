@@ -120,6 +120,37 @@ class TheReel(unittest.TestCase):
         far = size.size_trade(dict(nse, stop=1300.0), cfg(), today=TODAY)
         self.assertIn("more than your \u20b950 max loss per trade", far["refusal"])
 
+    def test_a_target_rounded_to_the_nse_step_is_not_refused(self):
+        # entry 812.40, stop 806.10: 3.45R is 834.135 -> 834.15 (3.452R), 1.78R is 823.614 -> 823.60 (1.778R)
+        c = cfg(max_loss_per_trade_usd=900, max_position_pct=30, max_order_usd=30000, budget=100000,
+                min_reward_risk=1.78, max_reward_risk=3.45)
+        base = plan(symbol="SBIN.NS", entry=812.40, stop=806.10, risk_per_share=6.30, flat_by="15:00")
+        for target in (834.15, 823.60):
+            self.assertIsNone(size.size_trade(dict(base, target=target), c, today=TODAY).get("refusal"), target)
+        # a whole step past a limit is still refused
+        self.assertIn("over your maximum 3.45", size.size_trade(dict(base, target=834.20), c, today=TODAY)["refusal"])
+        self.assertIn("under your minimum 1.78", size.size_trade(dict(base, target=823.55), c, today=TODAY)["refusal"])
+        # US stocks get half a cent: 1.78R of 6.30 is 11.214, so 823.61 (11.21) passes, 823.60 does not
+        us = dict(base, symbol="TSLA")
+        self.assertIsNone(size.size_trade(dict(us, target=823.61), c, today=TODAY).get("refusal"))
+        self.assertIn("under your minimum", size.size_trade(dict(us, target=823.60), c, today=TODAY)["refusal"])
+
+    def test_a_typed_nse_limit_is_rounded_to_the_price_step(self):
+        self.assertEqual((size.to_tick(812.43, "SBIN.NS"), size.to_tick(812.42, "SBIN.NS")), (812.45, 812.40))
+        self.assertEqual(size.to_tick(1412.46, "RELIANCE.NS"), 1412.5)
+        self.assertEqual(size.to_tick(812.43, "TSLA"), 812.43)
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "plan.json")
+            with open(p, "w") as fh:
+                json.dump(plan(symbol="SBIN.NS", entry=812.40, stop=806.10, target=823.60, risk_per_share=6.30,
+                               flat_by="15:00"), fh)
+            out = os.path.join(d, "orders.json")
+            code, text, _ = run(["--plan", p, "--config", CFG, "--portfolio", os.path.join(d, "none"),
+                                 "--now", NOW, "--limit", "812.43", "--budget", "100000", "--write", out])
+            self.assertIn("rounded to the nearest step, \u20b9812.45".replace("\u20b9", ""), text.replace("\u20b9", ""))
+            with open(out) as fh:
+                self.assertEqual(json.load(fh)["orders"][0]["limit_price"], "812.45")
+
     def test_the_fixture_orders_file_is_what_it_writes(self):
         with open(os.path.join(FIX, "trader-risk", "orders-tsla.json")) as fh:
             fixture = json.load(fh)["orders"][0]

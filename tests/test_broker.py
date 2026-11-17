@@ -302,6 +302,56 @@ class Flow(unittest.TestCase):
         self.assertIn("after you approve it there", text)
         self.assertNotIn("place_stock_order", text)
 
+    def test_no_broker_tickets_say_so_and_send_nothing(self):
+        with open(self.cfg) as fh:
+            c = json.load(fh)
+        c["broker"] = "none"
+        with open(self.cfg, "w") as fh:
+            json.dump(c, fh)
+        self.run_risk()
+        code, text, _ = run(self.args("show", "--index", "1"))
+        self.assertIn("ORDER 1 of 1, PAPER account, No broker set", text)
+        self.assertIn("nothing is sent", text)
+        self.assertNotIn("Alpaca", text)
+        self.assertNotIn("place_stock_order", text)
+        code, text, _ = run(self.args("approve", "--index", "1", "--reply", "yes"))
+        self.assertEqual(code, 0)
+        self.assertIn("nothing is sent", text)
+        self.assertNotIn("place_stock_order", text)
+        code, text, _ = run(self.args("show", "--index", "1"))
+        self.assertIn("waiting for you to place it with your broker", text)
+        self.assertNotIn("place_stock_order", text)
+
+    def test_no_broker_json_names_no_tool_and_asks_for_the_right_yes(self):
+        with open(self.cfg) as fh:
+            c = json.load(fh)
+        c["broker"] = "none"
+        with open(self.cfg, "w") as fh:
+            json.dump(c, fh)
+        self.run_risk()
+        code, text, _ = run(self.args("show", "--index", "1"))
+        self.assertIn("Reply \"yes\" to record that you will place this one order yourself", text)
+        code, text, _ = run(self.args("show", "--index", "1", "--json"))
+        doc = json.loads(text)
+        t = doc[0] if isinstance(doc, list) else (doc.get("tickets") or [doc])[0]
+        self.assertIsNone(t["tool"])
+        self.assertIsNone(t["tool_input"])
+        self.assertEqual(t["broker"], "none")
+
+    def test_no_broker_flatten_says_close_it_yourself(self):
+        with open(self.cfg) as fh:
+            c = json.load(fh)
+        c["broker"] = "none"
+        with open(self.cfg, "w") as fh:
+            json.dump(c, fh)
+        code, text, _ = run(["flatten", "--symbol", "TSLA", "--qty", "8", "--orders", self.orders,
+                             "--portfolio", self.none, "--plan", self.none, "--config", self.cfg, "--now", NOW])
+        self.assertEqual(code, 0)
+        self.assertIn("close the position yourself with your", text)
+        self.assertNotIn("Alpaca", text)
+        self.assertNotIn("place_stock_order", text)
+        self.assertNotIn("cancel_order_by_id", text)
+
     def test_fill_sell_relieves_the_oldest_lot(self):
         pf = {"cash": 0, "positions": [{"ticker": "KO", "shares": 3, "lots": [
             {"id": "KO-1", "date": "2025-01-02", "shares": 2, "cost": 120.0},

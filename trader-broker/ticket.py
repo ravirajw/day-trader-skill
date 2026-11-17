@@ -344,12 +344,33 @@ def kind_of(order, rv):
 
 # ---------------------------------------------------------------- rendering
 
+BROKER_NAMES = {"alpaca": "Alpaca", "ibkr": "Interactive Brokers", "none": "No broker set"}
+
+
+def no_broker(cfg):
+    """True when the config says "broker": "none": nothing is sent, you place the order yourself."""
+    return str(cfg.get("broker", "alpaca")).lower() == "none"
+
+
+def own_words(label, cfg):
+    """With no broker, an approved order waits for you, not for a place_stock_order call."""
+    return label.replace("waiting for the place_stock_order call", "waiting for you to place it with your broker "
+                         "and record the result") if no_broker(cfg) else label
+
+
+def broker_name(cfg):
+    """The ticket's broker label: Alpaca, Interactive Brokers, or "No broker set" for "none"."""
+    b = str(cfg.get("broker", "alpaca")).lower()
+    return BROKER_NAMES.get(b, b or "Alpaca")
+
+
 def render(order, idx, total, cfg, risk, state, today):
     ready, label, rv = status_of(order, risk, state, today)
+    label = own_words(label, cfg)
     broker = str(cfg.get("broker", "alpaca")).lower()
     paper = cfg.get("paper", True)
     acct = "PAPER account" if paper else "LIVE ACCOUNT, REAL MONEY"
-    lines = ["ORDER %d of %d, %s, %s" % (idx, total, acct, "Interactive Brokers" if broker == "ibkr" else "Alpaca")]
+    lines = ["ORDER %d of %d, %s, %s" % (idx, total, acct, broker_name(cfg))]
     for part in plain_parts(order):
         lines.append("  " + part)
     if order.get("why"):
@@ -360,6 +381,9 @@ def render(order, idx, total, cfg, risk, state, today):
     if broker == "ibkr":
         lines.append("  Claude drafts this with the Interactive Brokers connector. IBKR sends it to your")
         lines.append("  IBKR account, and it only goes to the market after you approve it there.")
+    elif broker == "none":
+        lines.append("  No broker is set in the config (broker: none): nothing is sent. Place this")
+        lines.append("  order yourself with your broker, then record what happened with ticket.py result.")
     else:
         lines.append("  Claude will call place_stock_order with exactly:")
         for l in json.dumps(tool_input(order), indent=2).splitlines():
@@ -368,8 +392,11 @@ def render(order, idx, total, cfg, risk, state, today):
             lines.append("  Alpaca places the entry, then the stop-loss and the take-profit as two orders")
             lines.append("  that cancel each other: when one fills, the other is canceled.")
     if ready:
-        lines.append("  Reply \"yes\" to place this one order, or \"no\" to skip it.")
-        if broker != "ibkr":
+        if broker == "none":
+            lines.append("  Reply \"yes\" to record that you will place this one order yourself, or \"no\" to skip it.")
+        else:
+            lines.append("  Reply \"yes\" to place this one order, or \"no\" to skip it.")
+        if broker not in ("ibkr", "none"):
             lines.append("  Claude's own card then asks again: Allow once places it, Deny stops it.")
     return "\n".join(lines), ready
 
@@ -377,10 +404,11 @@ def render(order, idx, total, cfg, risk, state, today):
 def ticket_json(order, idx, cfg, risk, state, today):
     ready, label, rv = status_of(order, risk, state, today)
     loss, stop = max_loss(order)
-    return {"index": idx, "ready": ready, "status": label, "plain": plain(order),
+    none = no_broker(cfg)
+    return {"index": idx, "ready": ready, "status": own_words(label, cfg), "plain": plain(order),
             "fingerprint": fingerprint(order), "paper": bool(cfg.get("paper", True)),
-            "broker": cfg.get("broker", "alpaca"), "tool": "place_stock_order",
-            "tool_input": tool_input(order), "why": order.get("why", ""),
+            "broker": cfg.get("broker", "alpaca"), "tool": None if none else "place_stock_order",
+            "tool_input": None if none else tool_input(order), "why": order.get("why", ""),
             "bracket": is_bracket(order), "max_loss": loss, "stop": stop}
 
 
@@ -513,6 +541,9 @@ def cmd_approve(a):
     print("Recorded your yes for order %d: %s." % (a.index, plain(order)))
     if str(cfg.get("broker", "alpaca")).lower() == "ibkr":
         print("Now draft it with the Interactive Brokers connector; approve it in your IBKR account.")
+    elif str(cfg.get("broker", "alpaca")).lower() == "none":
+        print("No broker is set in the config (broker: none), so nothing is sent. Place it yourself with "
+              "your broker, then: ticket.py result --index %d --status placed|denied|failed" % a.index)
     else:
         print("Now call place_stock_order with exactly:")
         print(json.dumps(tool_input(order), indent=2))
@@ -611,12 +642,19 @@ def cmd_flatten(a):
     print("Flatten %s: %s (flat by %s IST)." % (sym, plain(order), flat_by))
     print("Wrote it to %s%s." % (a.orders, (" (it replaced %d earlier proposal%s)"
                                              % (replaced, "" if replaced == 1 else "s")) if replaced else ""))
+    none = no_broker(cfg)
     if a.qty is None:
-        print("The qty comes from %s. Check it against get_open_position %s before you say yes." % (source, sym))
+        print("The qty comes from %s. Check it against %s before you say yes."
+              % (source, "what your broker shows you hold" if none else "get_open_position %s" % sym))
     print("Next:")
     print("  1. trader-risk: check.py. A sell that only closes what you hold is never blocked by the daily")
     print("     limits or the entry window.")
     print("  2. ticket.py show, then the user's yes for this one order.")
+    if none:
+        print("  3. No broker is set (broker: none), so nothing is sent: close the position yourself with your")
+        print("     broker (cancel its open stop-loss and target orders first), then record it with")
+        print("     ticket.py result --index 1 --status placed|failed.")
+        return 0
     print("  3. If the bracket's stop-loss and take-profit are still open, Alpaca holds these shares for them")
     print("     and rejects a new sell. Cancel them first: get_orders (status open, nested true), then")
     print("     cancel_order_by_id for each open leg (Needs approval). Then place_stock_order with the ticket.")

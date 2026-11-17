@@ -254,6 +254,33 @@ class DayTradeChecks(unittest.TestCase):
         with self.assertRaises(check.RiskError):
             self.one(tsla(), no_entries_before="9.45am")
 
+    def test_a_target_rounded_to_the_nse_step_passes(self):
+        lim = dict(min_reward_risk=1.78, max_reward_risk=3.45, max_loss_per_trade_usd=900, max_order_usd=30000,
+                   max_position_pct=30, budget=100000)
+        for target in (834.15, 823.60):
+            res = self.one(bracket("SBIN.NS", 36, 812.40, 806.10, target), **lim)
+            self.assertNotIn("reward:risk", reasons(res), target)
+        self.assertIn("over your maximum 3.45", reasons(self.one(bracket("SBIN.NS", 36, 812.40, 806.10, 834.20), **lim)))
+        self.assertIn("under your minimum 1.78", reasons(self.one(bracket("SBIN.NS", 36, 812.40, 806.10, 823.55), **lim)))
+
+    def test_nse_prices_off_the_price_step_are_blocked(self):
+        lim = dict(max_loss_per_trade_usd=900, max_order_usd=30000, max_position_pct=30, budget=100000,
+                   min_reward_risk=1.0)
+        good = bracket("SBIN.NS", 10, 812.40, 806.10, 823.60)
+        self.assertNotIn("price step", reasons(self.one(good, **lim)))
+        res = self.one(bracket("SBIN.NS", 10, 812.40, 806.12, 823.61), **lim)
+        why = reasons(res)
+        self.assertIn("stop_loss_stop_price 806.12 is not on NSE's 0.05 price step", why)
+        self.assertIn("Nearest step: 806.10", why)
+        self.assertIn("take_profit_limit_price 823.61", why)
+        self.assertEqual(verdicts(res), ["BLOCK"])
+        lim_order = dict(good, type="limit", limit_price="812.43")
+        self.assertIn("limit_price 812.43", reasons(self.one(lim_order, **lim)))
+        # a 0.10 step above 1,000; US stocks trade in cents
+        self.assertIn("price step", reasons(self.one(bracket("RELIANCE.NS", 2, 1412.5, 1400.05, 1437.5), **lim)))
+        self.assertNotIn("price step", reasons(self.one(bracket("RELIANCE.NS", 2, 1412.5, 1400.1, 1437.5), **lim)))
+        self.assertNotIn("price step", reasons(self.one(tsla())))
+
     def test_an_nse_order_is_checked_in_rupees(self):
         res = self.one(bracket("RELIANCE.NS", 5, 1412.5, 1400.0, 1437.5))
         why = reasons(res)

@@ -70,7 +70,7 @@ import sys
 
 DEFAULTS = {
     "budget": None, "cash_buffer_pct": 10, "max_position_pct": 30, "max_order_usd": 30000,
-    "min_order_usd": 5, "max_loss_per_trade_usd": 900, "max_daily_loss_usd": 3000, "max_trades_per_day": 3,
+    "min_order_usd": 5, "max_loss_per_trade_usd": 900, "max_daily_loss_usd": 2700, "max_trades_per_day": 3,
     "max_orders_per_day": 10, "min_reward_risk": 1.78, "require_stop": True,
     "no_entries_before": "09:30", "no_entries_after": "11:00", "flat_by": "15:00",
     "paper": True, "blocked": [], "allow_options": False, "allow_margin": False, "allow_short": False,
@@ -262,6 +262,41 @@ def _f(x):
 def is_nse(sym):
     """NSE symbols on Yahoo end in .NS and are sent exactly as written (RELIANCE.NS)."""
     return str(sym).upper().endswith(".NS")
+
+
+# NSE price steps (tick sizes) for stocks, by share price, from NSE circular CMTR67133 (15 Apr 2025).
+# NSE reviews these monthly from each stock's closing price; this uses the price in hand, so a stock
+# sitting right on a band edge (250, 1,000, 5,000 ...) can be one step off. US stocks trade in cents.
+NSE_TICKS = ((250, "0.01"), (1000, "0.05"), (5000, "0.10"), (10000, "0.50"), (20000, "1.00"), (None, "5.00"))
+
+
+def half_tick_cents(price, sym=""):
+    """Half of the smallest price step, in cents (see trader-budget/size.py): how far a target rounded
+    to the nearest step may sit past a reward:risk limit."""
+    return tick_of(price, sym) * 100 / 2.0
+
+
+def tick_of(price, sym=""):
+    """The smallest price step: NSE's band for .NS stocks (NSE_TICKS), a cent otherwise."""
+    if is_nse(sym):
+        for top, t in NSE_TICKS:
+            if top is None or float(price) < top:
+                return float(t)
+    return 0.01
+
+
+def on_tick(price, sym=""):
+    """True when the price is a whole number of price steps (to within a hundredth of a paisa)."""
+    step = tick_of(price, sym)
+    n = float(price) / step
+    return abs(n - round(n)) * step < 1e-4
+
+
+def to_tick(price, sym=""):
+    """The nearest price step, half up (812.43 -> 812.45 on a 0.05 step)."""
+    step = tick_of(price, sym)
+    n = int(float(price) / step + 0.5 + 1e-9)
+    return round(n * step, 2)
 
 
 def rupees(text, sym):
@@ -464,6 +499,13 @@ def check(orders, cfg, portfolio=None, prices=None, state=None, today=None, now=
         elif oc or o.get("advanced_instructions"):
             warns.append("advanced order (%s): check every leg before you say yes"
                          % (oc or "advanced_instructions"))
+        if is_nse(sym):
+            for k in ("limit_price", "stop_price", "take_profit_limit_price", "stop_loss_stop_price",
+                      "stop_loss_limit_price"):
+                v = _f(o.get(k))
+                if v is not None and v > 0 and not on_tick(v, sym):
+                    reasons.append("price step: %s %s is not on NSE's %s price step for this price; NSE rejects "
+                                   "it. Nearest step: %s" % (k, _p(v), _p(tick_of(v, sym)), _p(to_tick(v, sym))))
 
         # asset
         if sym and OCC.match(sym.replace(" ", "")):
@@ -599,11 +641,13 @@ def check(orders, cfg, portfolio=None, prices=None, state=None, today=None, now=
                             later.append("target: the target %s must be %s the entry %s"
                                          % (_p(target), "above" if long else "below", _p(ref)))
                         else:
-                            rr = round(int(round(abs(target - ref) * 100)) / float(risk_c), 2)
-                            if min_rr and rr < min_rr - 1e-9:
+                            reward_c = int(round(abs(target - ref) * 100))
+                            rr = round(reward_c / float(risk_c), 2)
+                            slack = half_tick_cents(target, sym)
+                            if min_rr and rr < min_rr - 1e-9 and reward_c < min_rr * risk_c - slack - 1e-9:
                                 later.append("reward:risk: %.2f (target %s, entry %s, stop %s) is under your "
                                              "minimum %s" % (rr, _p(target), _p(ref), _p(stop), _num(min_rr)))
-                            if max_rr and rr > max_rr + 1e-9:
+                            if max_rr and rr > max_rr + 1e-9 and reward_c > max_rr * risk_c + slack + 1e-9:
                                 later.append("reward:risk: %.2f (target %s, entry %s, stop %s) is over your "
                                              "maximum %s" % (rr, _p(target), _p(ref), _p(stop), _num(max_rr)))
                     elif min_rr:

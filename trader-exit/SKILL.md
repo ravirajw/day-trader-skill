@@ -58,9 +58,14 @@ level`, `--offline FILE` (a saved Yahoo chart JSON for an ATR stop).
 
 A level setup has no opening range to lean on, so it needs a stop you name.
 
-- **Rounding.** The stop rounds AWAY from the entry to the cent (down, for a
-  long). Risk = entry minus stop. Target = entry + R x risk, rounded half up
-  to the cent. `2R` by default; `1R`, `1.5R` or `price:X` also work.
+- **Rounding.** Prices land on the smallest price step: a cent for US stocks; for
+  NSE (`.NS`) stocks, NSE's step for the price (0.01 under 250, 0.05 to 1,000,
+  0.10 to 5,000, 0.50 to 10,000, 1.00 to 20,000, 5.00 above; NSE circular
+  CMTR67133). The stop rounds AWAY from the entry (down, for a long). Risk =
+  entry minus stop. Target = entry + R x risk, rounded to the nearest step
+  (834.135 -> 834.15). That can sit up to half a step past a reward:risk
+  limit; trader-budget and trader-risk allow exactly that much.
+  `2R` by default; `1R`, `1.5R` or `price:X` also work.
 - **Refused, with the reason.** A stop at or above the entry. A target at or
   below it. A risk under 0.05% of the price: too tight to survive the
   spread, normal wiggle would stop you out. An entry.json that has not

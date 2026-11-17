@@ -67,7 +67,7 @@ DEFAULTS = {
     "max_order_usd": 30000,
     "min_order_usd": 5,
     "max_loss_per_trade_usd": 900,
-    "max_daily_loss_usd": 3000,
+    "max_daily_loss_usd": 2700,
     "max_trades_per_day": 3,
     "max_orders_per_day": 10,
     "min_reward_risk": 1.78,
@@ -283,6 +283,41 @@ def is_nse(sym):
     return str(sym).upper().endswith(".NS")
 
 
+# NSE price steps (tick sizes) for stocks, by share price, from NSE circular CMTR67133 (15 Apr 2025).
+# NSE reviews these monthly from each stock's closing price; this uses the price in hand, so a stock
+# sitting right on a band edge (250, 1,000, 5,000 ...) can be one step off. US stocks trade in cents.
+NSE_TICKS = ((250, "0.01"), (1000, "0.05"), (5000, "0.10"), (10000, "0.50"), (20000, "1.00"), (None, "5.00"))
+
+
+def half_tick_cents(price, sym=""):
+    """Half of the smallest price step, in cents: a target rounded to the nearest step can sit this far
+    past a reward:risk limit, so the limits allow it rather than refuse the plan's own rounding."""
+    return tick_of(price, sym) * 100 / 2.0
+
+
+def tick_of(price, sym=""):
+    """The smallest price step: NSE's band for .NS stocks (NSE_TICKS), a cent otherwise."""
+    if is_nse(sym):
+        for top, t in NSE_TICKS:
+            if top is None or float(price) < top:
+                return float(t)
+    return 0.01
+
+
+def on_tick(price, sym=""):
+    """True when the price is a whole number of price steps (to within a hundredth of a paisa)."""
+    step = tick_of(price, sym)
+    n = float(price) / step
+    return abs(n - round(n)) * step < 1e-4
+
+
+def to_tick(price, sym=""):
+    """The nearest price step, half up (812.43 -> 812.45 on a 0.05 step)."""
+    step = tick_of(price, sym)
+    n = int(float(price) / step + 0.5 + 1e-9)
+    return round(n * step, 2)
+
+
 def rupees(text, sym):
     """Prices for NSE (.NS) symbols are in rupees: swap the dollar sign for one message."""
     return text.replace("$", "\u20b9") if is_nse(sym) else text
@@ -396,11 +431,11 @@ def size_trade(plan, cfg, budget=None, limit=None, price=None, cash=None, today=
         else:
             refusal = ("one share of %s costs %s, more than your %s limit (%s). No order."
                        % (sym, money(ref), bound[0], limits[[l["name"] for l in limits].index(bound[0])]["how"]))
-    elif _f(c.get("min_reward_risk")) and reward_c < _f(c["min_reward_risk"]) * risk_c - EPS:
+    elif _f(c.get("min_reward_risk")) and reward_c < _f(c["min_reward_risk"]) * risk_c - half_tick_cents(target, sym) - EPS:
         refusal = ("reward:risk %.2f (target %s, entry %s, stop %s) is under your minimum %s, so trader-risk "
                    "would block it. No order. Skip it, or make a new plan with trader-exit."
                    % (reward_c / float(risk_c), _price(target), _price(ref), _price(stop), _num(c["min_reward_risk"])))
-    elif _f(c.get("max_reward_risk")) and reward_c > _f(c["max_reward_risk"]) * risk_c + EPS:
+    elif _f(c.get("max_reward_risk")) and reward_c > _f(c["max_reward_risk"]) * risk_c + half_tick_cents(target, sym) + EPS:
         refusal = ("reward:risk %.2f (target %s, entry %s, stop %s) is over your maximum %s, so trader-risk "
                    "would block it. No order. Make a new plan with a nearer target in trader-exit."
                    % (reward_c / float(risk_c), _price(target), _price(ref), _price(stop), _num(c["max_reward_risk"])))
@@ -800,6 +835,11 @@ def run_plan(a, cfg):
                 raise SizeError("--limit wants a price, like --limit 364.00")
     sym = str((plan or {}).get("symbol") or "").upper()
     notes, price = [], None
+    if limit is not None and not on_tick(limit, sym):
+        snapped = to_tick(limit, sym)
+        notes.append("Limit %s is not on the price step (%s for this price): rounded to the nearest step, %s."
+                     % (_price(limit), _price(tick_of(limit, sym)), _price(snapped)))
+        limit = snapped
     ppath = a.prices or ("trader/prices.json" if os.path.exists("trader/prices.json") else None)
     if ppath and limit is None and sym:
         pdoc = read_json(ppath, "prices")

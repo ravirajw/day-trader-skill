@@ -50,6 +50,33 @@ def c(entry_px, stop, target="2R", oh=362.18, ol=354.47, atr=None, n=None):
 
 
 class Math(unittest.TestCase):
+    def test_nse_prices_land_on_nse_price_steps(self):
+        D = exitp.Decimal
+        steps = [(exitp.tick_size(px, "X.NS"), want) for px, want in
+                 ((180, "0.01"), (812.4, "0.05"), (1412.5, "0.10"), (7000, "0.50"), (12500, "1.00"), (30000, "5.00"))]
+        for got, want in steps:
+            self.assertEqual(got, D(want))
+        self.assertEqual(exitp.tick_size(812.4, "TSLA"), D("0.01"))
+        # SBIN-like: entry 812.40, stop 806.12 -> 806.10 (down a step), risk 6.30
+        hi = exitp.compute(812.40, "price", D("806.12"), "r", D("3.45"), sym="SBIN.NS")
+        self.assertEqual((hi["stop"], hi["target"]), (D("806.10"), D("834.15")))   # 834.135 -> nearest 0.05
+        lo = exitp.compute(812.40, "price", D("806.12"), "r", D("1.78"), sym="SBIN.NS")
+        self.assertEqual(lo["target"], D("823.60"))                                # 823.614 -> nearest 0.05
+        self.assertEqual(exitp.compute(812.40, "price", D("806.12"), "price", D("830.03"), sym="SBIN.NS")["target"],
+                         D("830.05"))
+        # each price takes the step of its own band: a target over 1,000 is on 0.10, not the entry's 0.05
+        up = exitp.compute(995.35, "price", D("990.10"), "r", D("2"), sym="X.NS")
+        self.assertEqual((up["stop"], up["target"]), (D("990.10"), D("1005.90")))    # 1005.85 -> 0.10 step
+        self.assertEqual(exitp.compute(248.50, "price", D("246.00"), "r", D("2"), sym="X.NS")["target"],
+                         D("253.50"))                                                 # 253.50 on 0.05
+        self.assertEqual(exitp.compute(248.50, "price", D("246.03"), "r", D("2"), sym="X.NS")["target"],
+                         D("253.45"))                                                 # 253.44 -> 253.45
+        self.assertEqual(exitp.compute(1004.0, "price", D("999.97"), "r", D("1"), sym="X.NS")["stop"],
+                         D("999.95"))                                                 # stop under 1,000: 0.05
+        # US stocks are unchanged: cents (stop stays 806.12, risk 6.28, 3.45R = 834.066 -> 834.07)
+        us = exitp.compute(812.40, "price", D("806.12"), "r", D("3.45"))
+        self.assertEqual((us["stop"], us["target"]), (D("806.12"), D("834.07")))
+
     def test_the_reel_or_mid_1r(self):
         p = c(364.18, "or-mid", "1R")
         self.assertEqual(p["stop"], Decimal("358.32"))           # floor(358.325)
