@@ -7,7 +7,7 @@ session in the data.
 
     python3 timemachine.py run                          # trader/plan.json, 10,000 replays, seed 19
     python3 timemachine.py run --write                  # also save trader/timemachine.json
-    python3 timemachine.py run --until 15:15            # stop each replay at your flat-by time
+    python3 timemachine.py run --until 15:00            # stop each replay at your flat-by time
     python3 timemachine.py run --seed 7 --replays 20000 --json
     python3 timemachine.py run --symbol TSLA --date 2026-10-19 --entry 364.18 \\
         --stop 358.32 --target 370.04 --entry-time "10:15 AM"
@@ -300,16 +300,20 @@ def split_sessions(bars):
     return days
 
 
-def full_sessions(days, before):
-    """Full sessions (all 75 bars) strictly before the plan's date, oldest first,
-    and the short ones that were left out (half days, gaps)."""
+def full_sessions(days, before, need=SESSION_BARS):
+    """Sessions strictly before the plan's date that have every bar from 9:15 up to
+    bar need-1 (all 75 by default), oldest first, cut to those `need` bars, and the
+    short ones that were left out (half days, gaps). Yahoo's NSE charts leave the
+    last bars of the day (15:15 to 15:25) empty on most days, so a replay that ends
+    at the flat-by time asks only for the bars it can use."""
+    need = max(1, min(SESSION_BARS, need))
     full, short = [], []
     for d in sorted(days):
         if d >= before:
             continue
         s = days[d]
-        if len(s) == SESSION_BARS:
-            full.append((d, [s[i] for i in range(SESSION_BARS)]))
+        if all(i in s for i in range(need)):
+            full.append((d, [s[i] for i in range(need)]))
         else:
             short.append({"date": d, "bars": len(s)})
     return full, short
@@ -319,9 +323,10 @@ def full_sessions(days, before):
 
 def build_pool(sessions):
     """pool[i] = every past session's bar i as (o, h, l, c) / bar i-1's close, in date order."""
-    pool = [[] for _ in range(SESSION_BARS)]
+    size = min(len(D) for _, D in sessions) if sessions else SESSION_BARS
+    pool = [[] for _ in range(size)]
     for _, D in sessions:
-        for i in range(1, SESSION_BARS):
+        for i in range(1, size):
             pc = D[i - 1]["c"]
             pool[i].append((D[i]["o"] / pc, D[i]["h"] / pc, D[i]["l"] / pc, D[i]["c"] / pc))
     return pool
@@ -338,7 +343,7 @@ def simulate(pool, entry, stop, target, k, last, replays=10000, seed=19, window=
     r_target = round(((target - entry) if long else (entry - target)) / risk, 4)
 
     def slot(rng, i):
-        return i if window == 0 else min(SESSION_BARS - 1, max(1, i + rng.randint(-window, window)))
+        return i if window == 0 else min(len(pool) - 1, max(1, i + rng.randint(-window, window)))
 
     rng = random.Random(seed)
     choice = rng.choice
@@ -701,10 +706,13 @@ def time_machine(text, plan, now_utc, replays=10000, seed=19, window=2, until=No
     if not eb["l"] - 0.01 <= plan["entry"] <= eb["h"] + 0.01:
         warn.append("the plan's entry %.2f is outside that bar's range %.2f to %.2f"
                     % (plan["entry"], eb["l"], eb["h"]))
-    sessions, short = full_sessions(days, plan["date"])
+    # a session needs every bar a replay can draw: up to the --until bar plus the slot window
+    sessions, short = full_sessions(days, plan["date"], last + 1 + window)
     if len(sessions) < MIN_SESSIONS:
-        raise TMError("only %d full session(s) of %s before %s in the data; the time machine needs at least %d"
-                      % (len(sessions), sym, plan["date"], MIN_SESSIONS))
+        raise TMError("only %d full session(s) of %s before %s in the data (every bar from 9:15 AM to %s); "
+                      "the time machine needs at least %d"
+                      % (len(sessions), sym, plan["date"],
+                         clock12(OPEN_MIN + 5 * min(SESSION_BARS, last + 1 + window)), MIN_SESSIONS))
     pool = build_pool(sessions)
     mc = simulate(pool, plan["entry"], plan["stop"], plan["target"], k, last, replays, seed, window, plan["side"])
     mc = dict(mc, until=clock24(until_min), pool_sessions=len(sessions), pool_from=sessions[0][0],
