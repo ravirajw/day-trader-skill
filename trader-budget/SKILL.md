@@ -50,15 +50,17 @@ another day is refused: make a new one with trader-exit.
 ## Step 1: set the rules once
 
 If `trader/config.json` does not exist, copy `config.example.json` into
-`trader/config.json` and ask the user for each value in plain words:
+`trader/config.json` (its `"watchlist": "nifty50.txt"` is read from the folder you run in: copy
+`trader-scanner/nifty50.txt` there too, or point it at your own list) and ask the user for each value in plain words:
 
 - **budget**: how much money this is for. Only money they can afford to lose.
 - **cash_buffer_pct**: how much always stays in cash (default 10).
-- **max_loss_per_trade_usd**: the most one trade may lose if the stop fills at the stop (default 50).
-- **max_position_pct**, **max_order_usd**, **min_order_usd**: the biggest position (75% of the
-  budget), the biggest order ($4,000) and the smallest order ($5).
-- The day limits trader-risk enforces: **max_daily_loss_usd** (150), **max_trades_per_day** (3),
-  **min_reward_risk** (1.0), **max_reward_risk** (optional, off by default), **require_stop** (true), **no_entries_before** / **no_entries_after**
+- **max_loss_per_trade_usd**: the most one trade may lose if the stop fills at the stop, before
+  charges (default 900: about 1,000 a losing trade once roughly 100 of brokerage and taxes is added).
+- **max_position_pct**, **max_order_usd**, **min_order_usd**: the biggest position (30% of the
+  budget), the biggest order (30,000) and the smallest order (5).
+- The day limits trader-risk enforces: **max_daily_loss_usd** (3,000), **max_trades_per_day** (3),
+  **min_reward_risk** (1.78: 1.78 x 900 = 1,602 gross, about 1,500 after charges), **max_reward_risk** (3.45 in the example: 3.45 x 900 = 3,105 gross, about 3,000 after charges; the scanner loop puts its targets here; no maximum when it is left out), **require_stop** (true), **no_entries_before** / **no_entries_after**
   ("09:30" / "11:00") and **flat_by** ("15:00"), all IST.
 - **blocked**: tickers they never want to trade.
 - Keep **paper** true until they have watched it work on a paper account.
@@ -103,7 +105,7 @@ _This example is the original US recording (TSLA on the NYSE, New York time, US 
 
 TSLA on Monday 2026-10-19. Opening-range breakout: entry 364.18 at 10:15 AM,
 stop 358.32 (the opening-range midpoint), target 370.04 (1R). Risk 5.86 a
-share. The example config: $5,000 budget, 10% cash buffer, $50 max loss.
+share. The reel's config: $5,000 budget, 10% cash buffer, $50 max loss.
 
 | limit | the math | shares |
 | --- | --- | --- |
