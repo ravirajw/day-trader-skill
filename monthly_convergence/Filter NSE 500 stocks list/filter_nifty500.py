@@ -1,13 +1,12 @@
 """
-Step 2 - Filter the Nifty 500 list: keep only ordinary traded shares.
+Step 2 - Filter every Nifty 500 list made by step 1: keep only ordinary traded shares.
 
-Input : the list made by step 1, in ../Get NSE 500 stocks list/output/
-          nifty500_latest.csv        (default)
-          nifty500_<YYYY-MM-DD>.csv  (with --date)
-        If that list does not exist the script stops with an error. It does NOT create it:
-        run step 1 first (get_nifty500.py, with the same --date).
-Output: output/nifty500_filtered_latest.csv  or  output/nifty500_filtered_<YYYY-MM-DD>.csv
-        (same columns as the input list), and the removed entries with the reason are printed.
+No options. It filters EVERY list in ../Get NSE 500 stocks list/output/:
+  nifty500_latest.csv         -> output/nifty500_filtered_latest.csv
+  nifty500_<YYYY-MM-DD>.csv   -> output/nifty500_filtered_<YYYY-MM-DD>.csv
+If there are no lists the script stops with an error. It does NOT create them: run step 1 first
+(get_nifty500.py). Each run filters all lists again (it takes a few seconds), so the outputs always
+match the current lists.
 
 What is removed (not ordinary shares, so not traded like a stock):
   1. REITs and InvITs (units, not shares), e.g. EMBASSY, BIRET, BAGMANE. Found from the ISIN:
@@ -17,13 +16,12 @@ What is removed (not ordinary shares, so not traded like a stock):
 
 What is NOT removed: stocks that have since been delisted, merged or renamed. On the list's date
 they were real, traded index stocks, so a backtest must keep them (dropping them would bias it).
-A stock with no ISIN in the list is kept (older lists miss a few ISINs) and is named in the summary.
+A stock with no ISIN in the list is kept (older lists miss a few ISINs).
 
 Usage (from this folder):
-  ../.venv/bin/python filter_nifty500.py                    # latest list
-  ../.venv/bin/python filter_nifty500.py --date 2011-01-31  # list on that date
+  ../.venv/bin/python filter_nifty500.py
 """
-import argparse
+import glob
 import os
 import sys
 
@@ -40,43 +38,36 @@ def reason(row):
     series = str(row.get("Series", "") or "").strip()
     if sym.upper().startswith("DUMMY"):
         return "NSE placeholder (DUMMY symbol), not a stock"
-    if series in NON_SHARE_SERIES:
-        return f"{NON_SHARE_SERIES[series]} units (series {series}), not shares"
-    if isin.startswith("IN") and len(isin) == 12 and isin[7:9] != "01":
-        return f"not equity shares (ISIN {isin}: security type {isin[7:9]}, shares are 01), e.g. REIT/InvIT units"
+    if series in NON_SHARE_SERIES or (isin.startswith("IN") and len(isin) == 12 and isin[7:9] != "01"):
+        return "REIT/InvIT units, not shares"
     return ""
 
 
-def main(a):
-    label = a.date or "latest"
-    src = os.path.join(IN_DIR, f"nifty500_{label}.csv")
-    if not os.path.exists(src):
-        sys.exit(f"Nifty 500 list not found: {os.path.normpath(src)}\n"
-                 f"Run step 1 first: get_nifty500.py" + (f" --date {a.date}" if a.date else ""))
-    df = pd.read_csv(src, dtype=str).fillna("")
-    df["Reason"] = df.apply(reason, axis=1)
-    keep, drop = df[df.Reason == ""].drop(columns="Reason"), df[df.Reason != ""]
-    no_isin = keep[keep.get("ISIN Code", pd.Series("", index=keep.index)) == ""].Symbol.tolist()
-
+def main():
+    files = sorted(glob.glob(os.path.join(IN_DIR, "nifty500_*.csv")))
+    if not files:
+        sys.exit(f"No Nifty 500 lists found in {os.path.normpath(IN_DIR)}\nRun step 1 first: get_nifty500.py")
     os.makedirs(OUT_DIR, exist_ok=True)
-    out = os.path.join(OUT_DIR, f"nifty500_filtered_{label}.csv")
-    keep.to_csv(out, index=False)
+    removed = {}          # (symbol, reason) -> lists it was removed from
+    for f in files:
+        label = os.path.basename(f)[len("nifty500_"):-4]
+        df = pd.read_csv(f, dtype=str).fillna("")
+        df["Reason"] = df.apply(reason, axis=1)
+        df[df.Reason == ""].drop(columns="Reason").to_csv(os.path.join(OUT_DIR, f"nifty500_filtered_{label}.csv"), index=False)
+        for r in df[df.Reason != ""].itertuples():
+            removed.setdefault((r.Symbol, r.Reason), []).append(label)
 
-    print(f"Nifty 500 list ({label}): {len(df)}   kept: {len(keep)}   removed: {len(drop)}")
-    print(f"Input:  {os.path.normpath(src)}")
-    print(f"Saved:  {out}")
-    if len(drop):
-        print("\nRemoved:")
-        print(drop[["Symbol", "Company Name", "Reason"]].to_string(index=False))
-    if no_isin:
-        print(f"\nKept, but no ISIN in the list to check (older list): {', '.join(no_isin)}")
+    labels = [os.path.basename(f)[len("nifty500_"):-4] for f in files]
+    dated = sorted(l for l in labels if l != "latest")
+    print(f"Filtered {len(files)} lists" + (f" ({dated[0]} to {dated[-1]}" + (", plus latest)" if "latest" in labels else ")") if dated else "")
+          + f"\nSaved to {OUT_DIR}")
+    if not removed:
+        print("Nothing removed: every entry is an ordinary share.")
+        return
+    print("\nRemoved (symbol, reason, lists):")
+    for (sym, why), ls in sorted(removed.items()):
+        print(f"  {sym:<12} {why}   in {len(ls)} list(s): {ls[0]}" + (f" to {ls[-1]}" if len(ls) > 1 else ""))
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Keep only ordinary traded shares in a Nifty 500 list")
-    ap.add_argument("--date", help="YYYY-MM-DD: filter the list for this date (default: latest list)")
-    a = ap.parse_args()
-    if a.date:
-        try: a.date = str(pd.Timestamp(a.date).date())
-        except ValueError: sys.exit(f"Not a date: {a.date} (use YYYY-MM-DD)")
-    main(a)
+    main()
