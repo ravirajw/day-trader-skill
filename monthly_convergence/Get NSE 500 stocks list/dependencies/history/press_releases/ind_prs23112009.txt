@@ -1,0 +1,50 @@
+IISL
+IISL
+INDIA INDEX SERVICES & PRODUCTS LIMITED
+(A joint venture of NSE & CRISIL)
+PRESS RELEASE
+The following indices maintained by IISL are being computed using free float market
+capitalization methodology:
+a) S&P CNX Nifty Index
+b) S&P CNX Defty Index
+c) CNX Nifty Junior Index
+d) CNX 100 Index
+e) CNX Realty Index
+f) CNX PSU Bank Index
+g) S&P CNX Nifty Shariah Index
+h) S&P CNX 500 Shariah Index
+With effect from February 26, 2010, the following indices will be calculated using free float
+market capitalization methodology:
+ CNX IT Index
+ CNX Bank Index
+ CNX Midcap Index
+ Nifty Midcap 50 Index
+The following additional information is being provided related to free float methodology and
+impact on index values:
+ The index values to be computed from February 26, 2010 will be part of the same index. It will
+not be a new index.
+ There will be no change to the index value on the date of transition due to the change in the
+methodology. The index divisor will be suitably adjusted to ensure continuity in index
+values.
+ The free float factor (Investible Weight Factor – IWF) for each company in the index will be
+determined based on the public shareholding of the companies as disclosed in the
+shareholding pattern submitted to the stock exchanges by these companies. Further, the
+following categories would also be excluded from the free float factor where identifiable
+separately:
+ Government holding in the capacity of strategic investor
+ Shares held by promoters through ADR/GDRs.
+St t i t k b t b di
+Page 1
+IISL
+ Strategic stakes by corporate bodies
+ Investments under FDI category
+ Equity held by associate/group companies (cross-holdings)
+ Free float factor for each company in the index will be updated based on the shareholding
+pattern submitted on a quarterly basis by companies to the stock exchanges.
+Other indices computed by IISL currently using full market capitalization weighted methodology
+will also be computed using free float weighted market capitalization subsequently in a phased
+manner. The time schedule for the implementation of the same will be communicated at a later
+date.
+Place: Mumbai
+Date: November 23, 2009
+Page 2
