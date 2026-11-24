@@ -39,10 +39,20 @@ Known gap, filled by hand (MANUAL_CHANGES below): the press release of 2 Mar 201
 ("Change in S&P CNX 500 Index w.e.f March 7, 2012") is missing from NSE's site and the archive.
 Its changes are taken from the difference between the saved copies of Jan 2010 and Jan 2014.
 
+Many dates in one run (NSE and the archive are checked for updates only once):
+  --month-ends        one list per date in ../Get month ends dates/output/month_end_dates.csv
+                      (the script stops if that file does not exist; run get_month_ends.py first)
+  --dates-file PATH   one list per date in any CSV of dates (column "Last trading day", or the first column)
+  --start / --end     optional, YYYY-MM: only months in this range
+  Dates that have not come yet (e.g. an expected month end later this month) are skipped.
+
 Usage (from this folder):
-  ./.venv/bin/python get_nifty500.py
-  ./.venv/bin/python get_nifty500.py --date 2011-01-31
-  ./.venv/bin/python get_nifty500.py --check
+  ../.venv/bin/python get_nifty500.py                                   # today's list
+  ../.venv/bin/python get_nifty500.py --date 2011-01-31                 # one date
+  ../.venv/bin/python get_nifty500.py --month-ends                      # every month end
+  ../.venv/bin/python get_nifty500.py --month-ends --start 2011-01 --end 2026-10
+  ../.venv/bin/python get_nifty500.py --dates-file /path/to/dates.csv   # your own list of dates
+  ../.venv/bin/python get_nifty500.py --check
 """
 import argparse
 import io
@@ -59,6 +69,7 @@ import requests
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT_DIR = os.path.join(HERE, "dependencies")    # data the script needs, kept between runs
 RESULT_DIR = os.path.join(HERE, "output")       # the lists it produces
+MONTH_ENDS = os.path.join(HERE, "..", "Get month ends dates", "output", "month_end_dates.csv")
 LATEST = os.path.join(RESULT_DIR, "nifty500_latest.csv")
 HIST = os.path.join(OUT_DIR, "history")
 COPIES_DIR = os.path.join(HIST, "archive_copies")
@@ -525,19 +536,49 @@ def details(members, day, copies, changes):
     return pd.DataFrame(rows)
 
 
-def main_on(day):
-    print("Updating the saved list copies and press releases (only new ones are downloaded)...")
-    copies = saved_copies(); changes = all_changes(copies)
+def main_on(day, copies=None, changes=None, quiet=False):
+    if copies is None:
+        print("Updating the saved list copies and press releases (only new ones are downloaded)...")
+        copies = saved_copies(); changes = all_changes(copies)
     members, base, n = rebuild(day, copies, changes)
     df = details(members, day, copies, changes)
     out = os.path.join(RESULT_DIR, f"nifty500_{day.date()}.csv")
     df.to_csv(out, index=False)
     added = df[df.Source.str.startswith("press")]
+    if quiet:
+        return len(df), base
     print(f"\nNifty 500 list on {day.date()}")
     print(f"Started from NSE's list as saved on {base.date()}, then applied {n} announced change(s) up to {day.date()}")
     print(f"Stocks: {len(df)}" + ("" if 495 <= len(df) <= 505 else "   WARNING: expected about 500, check the changes file"))
     print(f"Added by press releases since that copy: {len(added)}")
     print(f"Saved:  {out}")
+
+
+def main_many(dates_file, start, end):
+    """One list per date in a CSV of dates (column "Last trading day", or the first date column), between
+    months start and end. NSE and the archive are checked for updates once, not once per date."""
+    if not os.path.exists(dates_file):
+        sys.exit(f"Dates file not found: {os.path.normpath(dates_file)}" +
+                 ("\nRun get_month_ends.py first (in ../Get month ends dates)." if dates_file == MONTH_ENDS else ""))
+    d = pd.read_csv(dates_file, dtype=str)
+    col = "Last trading day" if "Last trading day" in d else d.columns[0]
+    days = pd.to_datetime(d[col])
+    days = sorted(x for x in days if (not start or x.to_period("M") >= pd.Period(start, "M"))
+                  and (not end or x.to_period("M") <= pd.Period(end, "M")))
+    today = pd.Timestamp(date.today())
+    future = [x for x in days if x > today]
+    days = [x for x in days if x <= today]
+    if future: print(f"Skipped (not come yet): {', '.join(str(x.date()) for x in future)}")
+    if not days: sys.exit("No dates to build in that range.")
+    print("Updating the saved list copies and press releases (only new ones are downloaded)...")
+    copies = saved_copies(); changes = all_changes(copies)
+    print(f"Building {len(days)} lists, {days[0].date()} to {days[-1].date()}...")
+    odd = []
+    for day in days:
+        n, _ = main_on(day, copies, changes, quiet=True)
+        if not 495 <= n <= 505: odd.append(f"{day.date()} ({n} stocks)")
+    print(f"Saved {len(days)} lists to {RESULT_DIR}")
+    print("All lists have 495-505 stocks." if not odd else "WARNING, unusual size: " + ", ".join(odd))
 
 
 def main_check():
@@ -563,8 +604,14 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Nifty 500 list: latest, or as it was on a date")
     ap.add_argument("--date", help="YYYY-MM-DD: rebuild the list as it was on this date (default: today's list)")
     ap.add_argument("--check", action="store_true", help="rebuild every saved copy from the one before it and show differences")
+    ap.add_argument("--month-ends", action="store_true", help="one list per date in ../Get month ends dates/output/month_end_dates.csv")
+    ap.add_argument("--dates-file", help="path to a CSV of dates: one list per date")
+    ap.add_argument("--start", help="with --month-ends / --dates-file: first month, YYYY-MM")
+    ap.add_argument("--end", help="with --month-ends / --dates-file: last month, YYYY-MM")
     a = ap.parse_args()
     os.makedirs(OUT_DIR, exist_ok=True); os.makedirs(RESULT_DIR, exist_ok=True)
     if a.check: main_check()
+    elif a.month_ends: main_many(MONTH_ENDS, a.start, a.end)
+    elif a.dates_file: main_many(a.dates_file, a.start, a.end)
     elif a.date: main_on(pd.Timestamp(a.date))
     else: main()
