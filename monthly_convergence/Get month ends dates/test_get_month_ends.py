@@ -7,8 +7,8 @@ The saved file
      Muhurat), Fri 29 Mar 2019, Tue 31 May 2011.
   2. One row per month from Jan 2011 to the current month, in order. Every finished month is "Confirmed";
      only the current month is "Expected".
-  3. Every confirmed date is the last trading day of its month in step 5's NSE calendar (a separate record
-     of every day NSE traded), if step 5 has been run.
+  3. Every confirmed date is the last trading day of its month in step 4's NSE calendar (a separate record
+     of every day NSE traded), if step 4 has been run.
 
 How a finished month is found (NSE's answers simulated)
   4. It starts at the month's last calendar day, weekends included, and goes back to the first day with an
@@ -113,9 +113,9 @@ def main():
         y = c.Date[c["NSE file"] == "Yes"]
         last = y.groupby(y.str[:7]).max()
         bad = [(m, x, last.get(m)) for m, x in zip(conf.Month, conf["Last trading day"]) if last.get(m) != x]
-        check("3. every confirmed date = last NSE trading day in step 5's calendar", not bad, f"{len(conf)} months; differ: {bad[:5]}")
+        check("3. every confirmed date = last NSE trading day in step 4's calendar", not bad, f"{len(conf)} months; differ: {bad[:5]}")
     else:
-        check("3. (skipped: step 5's NSE calendar not found)", True)
+        check("3. (skipped: step 4's NSE calendar not found)", True)
 
     # ---------------------------------------------------------------- how a finished month is found
     def walk(per, files):
