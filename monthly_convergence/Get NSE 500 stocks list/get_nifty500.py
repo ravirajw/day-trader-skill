@@ -127,9 +127,10 @@ CANCELLED = [
     ("ind_prs23082024", "Exclude", "IDEA", "exclusion revoked by ind_prs25092024"),
     ("ind_prs25092024", None, None, "table layout; read by hand into MANUAL_CHANGES"),
 ]
-# Renames missing from NSE's symbol-change file: (old, new, date). Dates are approximate (first seen in NSE's
-# list by 4 May 2022); this only changes the symbol shown, not whether the stock is a member.
-EXTRA_RENAMES = [("PHILIPCARB", "PCBL", "2022-05-01"), ("BURGERKING", "RBA", "2022-05-01"), ("WABCOINDIA", "ZFCVINDIA", "2022-05-01")]
+# Renames missing from NSE's symbol-change file: (old, new, date). Date = the first day the new symbol is in
+# NSE's daily price file (checked day by day: the old symbol is gone that day). This only changes the symbol
+# shown, not whether the stock is a member.
+EXTRA_RENAMES = [("PHILIPCARB", "PCBL", "2022-01-13"), ("BURGERKING", "RBA", "2022-02-17"), ("WABCOINDIA", "ZFCVINDIA", "2022-04-01")]
 
 
 # ---------------------------------------------------------------- today's list

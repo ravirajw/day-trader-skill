@@ -77,7 +77,6 @@ BRIGADE,BRIGADE,Brigade Enterprises Ltd.,Realty,INE791I01019,list copy 2020-07-2
 BRITANNIA,BRITANNIA,Britannia Industries Ltd.,Fast Moving Consumer Goods,INE216A01030,list copy 2020-07-25
 BSE,BSE,BSE Ltd.,Financial Services,INE118H01025,list copy 2020-07-25
 BSOFT,BSOFT,Birlasoft Ltd.,Information Technology,INE836A01035,list copy 2020-07-25
-BURGERKING,RBA,Burger King India Ltd.,,,press release ind_prs22042021 (effective 2021-04-29)
 CAMS,CAMS,Computer Age Management Services Ltd.,Financial Services,INE596I01012,press release ind_prs23022021 (effective 2021-03-31)
 CANBK,CANBK,Canara Bank,Financial Services,INE476A01014,list copy 2020-07-25
 CANFINHOME,CANFINHOME,Can Fin Homes Ltd.,Financial Services,INE477A01020,list copy 2020-07-25
@@ -343,6 +342,7 @@ ONGC,ONGC,Oil & Natural Gas Corporation Ltd.,Oil Gas & Consumable Fuels,INE213A0
 ORIENTELEC,ORIENTELEC,Orient Electric Ltd.,Consumer Durables,INE142Z01019,list copy 2020-07-25
 PAGEIND,PAGEIND,Page Industries Ltd.,Textiles,INE761H01022,list copy 2020-07-25
 PAYTM,PAYTM,One 97 Communications Ltd.,Financial Services,INE982J01020,press release ind_prs24022022_1 (effective 2022-03-31)
+PCBL,PCBL,PCBL Ltd.,Chemicals,INE602A01031,list copy 2020-07-25
 PEL,PEL,Piramal Enterprises Ltd.,Financial Services,INE140A01024,list copy 2020-07-25
 PERSISTENT,PERSISTENT,Persistent Systems Ltd.,Information Technology,INE262H01013,list copy 2020-07-25
 PETRONET,PETRONET,Petronet LNG Ltd.,Oil Gas & Consumable Fuels,INE347G01014,list copy 2020-07-25
@@ -350,7 +350,6 @@ PFC,PFC,Power Finance Corporation Ltd.,Financial Services,INE134E01011,list copy
 PFIZER,PFIZER,Pfizer Ltd.,Healthcare,INE182A01018,list copy 2020-07-25
 PGHH,PGHH,Procter & Gamble Hygiene & Health Care Ltd.,Fast Moving Consumer Goods,INE179A01014,list copy 2020-07-25
 PGHL,PGHL,Procter & Gamble Health Ltd.,Healthcare,INE199A01012,list copy 2020-07-25
-PHILIPCARB,PCBL,Phillips Carbon Black Ltd.,CHEMICALS,INE602A01023,list copy 2020-07-25
 PHOENIXLTD,PHOENIXLTD,Phoenix Mills Ltd.,Realty,INE211B01039,list copy 2020-07-25
 PIDILITIND,PIDILITIND,Pidilite Industries Ltd.,Chemicals,INE318A01026,list copy 2020-07-25
 PIIND,PIIND,PI Industries Ltd.,Chemicals,INE603J01030,list copy 2020-07-25
@@ -378,6 +377,7 @@ RAJESHEXPO,RAJESHEXPO,Rajesh Exports Ltd.,Consumer Durables,INE343B01030,list co
 RALLIS,RALLIS,Rallis India Ltd.,Chemicals,INE613A01020,list copy 2020-07-25
 RAMCOCEM,RAMCOCEM,The Ramco Cements Ltd.,Construction Materials,INE331A01037,list copy 2020-07-25
 RATNAMANI,RATNAMANI,Ratnamani Metals & Tubes Ltd.,Capital Goods,INE703B01027,list copy 2020-07-25
+RBA,RBA,Restaurant Brands Asia Ltd.,Consumer Services,INE07T201019,press release ind_prs22042021 (effective 2021-04-29)
 RBLBANK,RBLBANK,RBL Bank Ltd.,Financial Services,INE976G01028,list copy 2020-07-25
 RCF,RCF,Rashtriya Chemicals & Fertilizers Ltd.,Chemicals,INE027A01015,list copy 2020-07-25
 RECLTD,RECLTD,REC Ltd.,Financial Services,INE020B01018,list copy 2020-07-25
@@ -487,7 +487,6 @@ VIPIND,VIPIND,V.I.P. Industries Ltd.,Consumer Durables,INE054A01027,list copy 20
 VMART,VMART,V-Mart Retail Ltd.,Consumer Services,INE665J01013,list copy 2020-07-25
 VOLTAS,VOLTAS,Voltas Ltd.,Consumer Durables,INE226A01021,list copy 2020-07-25
 VTL,VTL,Vardhman Textiles Ltd.,Textiles,INE825A01020,list copy 2020-07-25
-WABCOINDIA,ZFCVINDIA,WABCO India Ltd.,AUTOMOBILE,INE342J01019,list copy 2020-07-25
 WELCORP,WELCORP,Welspun Corp Ltd.,Capital Goods,INE191B01025,list copy 2020-07-25
 WELSPUNIND,WELSPUNLIV,Welspun India Ltd.,Textiles,INE192B01031,list copy 2020-07-25
 WESTLIFE,WESTLIFE,Westlife Development Ltd.,Consumer Services,INE274F01020,list copy 2020-07-25
@@ -497,6 +496,7 @@ WOCKPHARMA,WOCKPHARMA,Wockhardt Ltd.,Healthcare,INE049B01025,list copy 2020-07-2
 YESBANK,YESBANK,Yes Bank Ltd.,Financial Services,INE528G01035,press release ind_prs20082020 (effective 2020-09-25)
 ZEEL,ZEEL,Zee Entertainment Enterprises Ltd.,Media Entertainment & Publication,INE256A01028,list copy 2020-07-25
 ZENSARTECH,ZENSARTECH,Zensar Technolgies Ltd.,Information Technology,INE520A01027,list copy 2020-07-25
+ZFCVINDIA,ZFCVINDIA,ZF Commercial Vehicle Control Systems India Ltd.,Automobile and Auto Components,INE342J01019,list copy 2020-07-25
 ZOMATO,ETERNAL,Zomato Ltd.,Consumer Services,INE758T01015,press release ind_prs24022022_1 (effective 2022-03-31)
 ZYDUSLIFE,ZYDUSLIFE,Zydus Lifesciences Ltd.,Healthcare,INE010B01027,list copy 2020-07-25
 ZYDUSWELL,ZYDUSWELL,Zydus Wellness Ltd.,Fast Moving Consumer Goods,INE768C01010,list copy 2020-07-25
