@@ -1,5 +1,6 @@
 """
-Task 1 - Get the list of Nifty 500 stocks (the only stocks we trade): today's list, or the list on a past date.
+Step 2 - Get the list of Nifty 500 stocks (the only stocks we trade): today's list, or the list on a past date,
+already filtered to ordinary shares (see "Filter" below).
 
 Today's list (no --date):
   1. Downloads the official Nifty 500 constituents list from NSE
@@ -28,6 +29,17 @@ List on a past date (--date YYYY-MM-DD):
 
   --check rebuilds every saved copy from the one before it and prints any differences,
   to prove the announcements are being read correctly.
+
+Filter (every list is filtered before it is saved): only ordinary shares are kept. Removed:
+  1. REITs and InvITs - units, not shares (e.g. EMBASSY, BIRET, BAGMANE). Found from the ISIN: an Indian
+     ISIN is INE + 4-character issuer code + 2-digit security type + ...; type "01" is equity shares.
+     NSE's series "RR" (REIT) or "IV" (InvIT) is also used when the list has it.
+  2. NSE placeholders: symbols starting with DUMMY (used for a few days during a demerger).
+  NOT removed: stocks that have since been delisted, merged or renamed - on the list's date they were real
+  index stocks, so a backtest must keep them. A stock with no ISIN in the list is kept.
+  Every removal is written to output/removed_from_lists.csv (List, Symbol, Company Name, ISIN Code, Reason),
+  so nothing is taken out silently. --check is not affected: it compares the full rebuilt list with NSE's
+  own saved files (which do include REITs).
 
 Downloaded data is kept and reused (dependencies/history/), so later runs only fetch what is new:
   dependencies/history/archive_copies/      Internet Archive copies of NSE's list file
@@ -71,6 +83,8 @@ OUT_DIR = os.path.join(HERE, "dependencies")    # data the script needs, kept be
 RESULT_DIR = os.path.join(HERE, "output")       # the lists it produces
 MONTH_ENDS = os.path.join(HERE, "..", "Get month ends dates", "output", "month_end_dates.csv")
 LATEST = os.path.join(RESULT_DIR, "nifty500_latest.csv")
+REMOVED = os.path.join(RESULT_DIR, "removed_from_lists.csv")
+NON_SHARE_SERIES = {"RR": "REIT", "IV": "InvIT"}
 HIST = os.path.join(OUT_DIR, "history")
 COPIES_DIR = os.path.join(HIST, "archive_copies")
 PRS_DIR = os.path.join(HIST, "press_releases")
@@ -169,10 +183,12 @@ def main():
     df = validate(df)
 
     previous = pd.read_csv(LATEST) if os.path.exists(LATEST) else None
+    df, removed = remove_non_shares(df)
     df.to_csv(LATEST, index=False)
+    log_removed({"latest": removed})
 
     print(f"Nifty 500 list downloaded from {url}")
-    print(f"Stocks: {len(df)}")
+    print(f"Stocks: {len(df)}" + (f" (removed {len(removed)}: {', '.join(removed.Symbol)} - see {os.path.basename(REMOVED)})" if len(removed) else ""))
     print(f"Saved:  {LATEST}")
 
     if previous is not None:
@@ -537,21 +553,55 @@ def details(members, day, copies, changes):
     return pd.DataFrame(rows)
 
 
+# ---------------------------------------------------------------- filter: ordinary shares only
+def why_removed(row):
+    """Why a list entry is not an ordinary share ("" = keep it)."""
+    sym = str(row.get("Symbol", ""))
+    isin = str(row.get("ISIN Code", "") or "").strip()
+    series = str(row.get("Series", "") or "").strip()
+    if sym.upper().startswith("DUMMY"):
+        return "NSE placeholder (DUMMY symbol), not a stock"
+    if series in NON_SHARE_SERIES or (isin.startswith("IN") and len(isin) == 12 and isin[7:9] != "01"):
+        return "REIT/InvIT units, not shares"
+    return ""
+
+
+def remove_non_shares(df):
+    """(kept rows, removed rows with a Reason column)."""
+    df = df.fillna("")
+    why = df.apply(why_removed, axis=1) if len(df) else pd.Series(dtype=str)
+    removed = df[why != ""].assign(Reason=why[why != ""])
+    return df[why == ""].reset_index(drop=True), removed
+
+
+def log_removed(by_list):
+    """Write the removals of the lists just saved into output/removed_from_lists.csv (their old rows replaced)."""
+    cols = ["List", "Symbol", "Company Name", "ISIN Code", "Reason"]
+    old = pd.read_csv(REMOVED, dtype=str).fillna("") if os.path.exists(REMOVED) else pd.DataFrame(columns=cols)
+    old = old[~old.List.isin(list(by_list))]
+    new = [r.assign(List=label).reindex(columns=cols).fillna("") for label, r in by_list.items() if len(r)]
+    d = pd.concat([old] + new, ignore_index=True).sort_values(["List", "Symbol"])
+    d.to_csv(REMOVED, index=False)
+
+
 def main_on(day, copies=None, changes=None, quiet=False):
     if copies is None:
         print("Updating the saved list copies and press releases (only new ones are downloaded)...")
         copies = saved_copies(); changes = all_changes(copies)
     members, base, n = rebuild(day, copies, changes)
     df = details(members, day, copies, changes)
+    df, removed = remove_non_shares(df)
     out = os.path.join(RESULT_DIR, f"nifty500_{day.date()}.csv")
     df.to_csv(out, index=False)
     added = df[df.Source.str.startswith("press")]
     if quiet:
-        return len(df), base
+        return len(df), base, removed
+    log_removed({str(day.date()): removed})
     print(f"\nNifty 500 list on {day.date()}")
     print(f"Started from NSE's list as saved on {base.date()}, then applied {n} announced change(s) up to {day.date()}")
     print(f"Stocks: {len(df)}" + ("" if 495 <= len(df) <= 505 else "   WARNING: expected about 500, check the changes file"))
     print(f"Added by press releases since that copy: {len(added)}")
+    if len(removed): print(f"Removed (not ordinary shares): {', '.join(removed.Symbol + ' (' + removed.Reason + ')')}")
     print(f"Saved:  {out}")
 
 
@@ -574,12 +624,21 @@ def main_many(dates_file, start, end):
     print("Updating the saved list copies and press releases (only new ones are downloaded)...")
     copies = saved_copies(); changes = all_changes(copies)
     print(f"Building {len(days)} lists, {days[0].date()} to {days[-1].date()}...")
-    odd = []
+    odd, removed = [], {}
     for day in days:
-        n, _ = main_on(day, copies, changes, quiet=True)
+        n, _, rem = main_on(day, copies, changes, quiet=True)
+        removed[str(day.date())] = rem
         if not 495 <= n <= 505: odd.append(f"{day.date()} ({n} stocks)")
+    log_removed(removed)
     print(f"Saved {len(days)} lists to {RESULT_DIR}")
     print("All lists have 495-505 stocks." if not odd else "WARNING, unusual size: " + ", ".join(odd))
+    gone = pd.concat([r.assign(List=k) for k, r in removed.items()] or [pd.DataFrame(columns=["Symbol", "Reason", "List"])],
+                     ignore_index=True)
+    if len(gone):
+        print(f"Removed (not ordinary shares), see {os.path.basename(REMOVED)}:")
+        for (sym, why), g in gone.groupby(["Symbol", "Reason"]):
+            ls = sorted(g.List)
+            print(f"  {sym:<12} {why}   in {len(ls)} list(s): {ls[0]}" + (f" to {ls[-1]}" if len(ls) > 1 else ""))
 
 
 def main_check():

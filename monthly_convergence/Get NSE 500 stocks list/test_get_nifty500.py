@@ -26,6 +26,12 @@ Options
      next to it, both stop with a clear message and make no list.
   8. --month-ends next to step 1's folder: builds the month ends in --start/--end and skips the month end
      that has not come yet (the current month's "Expected" date).
+
+The filter (only ordinary shares are kept)
+  9. The rule: a REIT/InvIT (ISIN security type not "01", or series RR/IV) and a DUMMY placeholder are
+     removed with their reason; an ordinary share, and a stock with no ISIN, are kept.
+ 10. Our lists: no REIT/InvIT or DUMMY left in any list; every removal is in removed_from_lists.csv with a
+     reason and a list that exists; delisted stocks are kept (e.g. JETAIRWAYS in the 2018-12-31 list).
 """
 import glob
 import os
@@ -164,6 +170,36 @@ def main():
     wrong = [k for k, v in facts.items() if not v]
     check("4. our past-date lists: 495-505 stocks, no duplicates, complete rows; known facts right",
           len(files) >= 190 and not bad and not wrong, f"{len(files)} lists; bad {bad[:5]}; wrong facts {wrong}")
+
+    # 9. the filter rule
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, HERE)
+    import get_nifty500 as g
+    sample = pd.DataFrame({
+        "Symbol": ["RELIANCE", "EMBASSY", "PGINVIT", "DUMMYHEG", "OLDCO", "NEWREIT"],
+        "ISIN Code": ["INE002A01018", "INE041025011", "INE0GGX23010", "DUM545A01024", "", ""],
+        "Series": ["EQ", "", "", "", "", "RR"]})
+    kept, removed = g.remove_non_shares(sample)
+    ok = (list(kept.Symbol) == ["RELIANCE", "OLDCO"]
+          and dict(zip(removed.Symbol, removed.Reason)) == {
+              "EMBASSY": "REIT/InvIT units, not shares", "PGINVIT": "REIT/InvIT units, not shares",
+              "DUMMYHEG": "NSE placeholder (DUMMY symbol), not a stock", "NEWREIT": "REIT/InvIT units, not shares"})
+    check("9. filter rule: REIT/InvIT and DUMMY removed with reason; shares and no-ISIN kept", ok,
+          f"kept {list(kept.Symbol)}; removed {dict(zip(removed.Symbol, removed.Reason))}")
+
+    # 10. our lists
+    left = []
+    for f in glob.glob(os.path.join(OUT, "nifty500_*.csv")):
+        x = pd.read_csv(f, dtype=str).fillna("")
+        if (x.apply(g.why_removed, axis=1) != "").any(): left.append(os.path.basename(f))
+    rem = pd.read_csv(os.path.join(OUT, "removed_from_lists.csv"), dtype=str).fillna("")
+    lists_ok = all(os.path.exists(os.path.join(OUT, f"nifty500_{l}.csv")) for l in rem.List)
+    in_lists = [r for r in rem.itertuples() if r.Symbol in set(pd.read_csv(os.path.join(OUT, f"nifty500_{r.List}.csv"), dtype=str).Symbol)]
+    jet = "JETAIRWAYS" in set(pd.read_csv(os.path.join(OUT, "nifty500_2018-12-31.csv"), dtype=str).Symbol)
+    ok = (not left and len(rem) > 0 and (rem.Reason != "").all() and lists_ok and not in_lists and jet
+          and list(rem.columns) == ["List", "Symbol", "Company Name", "ISIN Code", "Reason"])
+    check("10. our lists: no REIT/DUMMY left, removals logged with reasons, delisted stocks kept", ok,
+          f"{len(rem)} removals logged ({', '.join(sorted(set(rem.Symbol)))}); lists with non-shares left: {left[:3]}; JETAIRWAYS kept: {jet}")
 
     print(f"\n{sum(results)} of {len(results)} checks passed")
     sys.exit(0 if all(results) else 1)
