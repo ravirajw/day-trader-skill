@@ -32,6 +32,10 @@ The filter (only ordinary shares are kept)
      removed with their reason; an ordinary share, and a stock with no ISIN, are kept.
  10. Our lists: no REIT/InvIT or DUMMY left in any list; every removal is in removed_from_lists.csv with a
      reason and a list that exists; delisted stocks are kept (e.g. JETAIRWAYS in the 2018-12-31 list).
+
+For the next step
+ 11. output/symbol_changes.csv holds exactly the renames the script uses (NSE's list plus the 3 added in
+     EXTRA_RENAMES, with their dates), so step 3 can follow the same renames without this script.
 """
 import glob
 import os
@@ -200,6 +204,14 @@ def main():
           and list(rem.columns) == ["List", "Symbol", "Company Name", "ISIN Code", "Reason"])
     check("10. our lists: no REIT/DUMMY left, removals logged with reasons, delisted stocks kept", ok,
           f"{len(rem)} removals logged ({', '.join(sorted(set(rem.Symbol)))}); lists with non-shares left: {left[:3]}; JETAIRWAYS kept: {jet}")
+
+    # 11. the rename list for step 3
+    used = {(o, str(f.date()), n) for o, lst in g.renames().items() for f, n in lst}
+    saved = pd.read_csv(os.path.join(OUT, "symbol_changes.csv"), dtype=str).fillna("")
+    in_file = set(zip(saved["Old symbol"], saved.From, saved["New symbol"]))
+    extras = {(o, d, n) for o, n, d in g.EXTRA_RENAMES}
+    check("11. symbol_changes.csv = the renames the script uses, including the 3 added ones", in_file == used and extras <= in_file,
+          f"{len(in_file)} renames saved, {len(used)} used; extras saved: {sorted(extras & in_file)}")
 
     print(f"\n{sum(results)} of {len(results)} checks passed")
     sys.exit(0 if all(results) else 1)

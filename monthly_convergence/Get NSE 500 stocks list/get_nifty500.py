@@ -41,6 +41,10 @@ Filter (every list is filtered before it is saved): only ordinary shares are kep
   so nothing is taken out silently. --check is not affected: it compares the full rebuilt list with NSE's
   own saved files (which do include REITs).
 
+Renames used are also saved as output/symbol_changes.csv (Old symbol, New symbol, From, Company Name, Source):
+NSE's official list plus EXTRA_RENAMES. The next step (combine stocks) reads it, so all steps follow the same
+renames without needing this script.
+
 Downloaded data is kept and reused (dependencies/history/), so later runs only fetch what is new:
   dependencies/history/archive_copies/      Internet Archive copies of NSE's list file
   dependencies/history/press_releases/      text of each NSE press release that mentions the Nifty 500 (PDFs are deleted once read)
@@ -84,6 +88,7 @@ RESULT_DIR = os.path.join(HERE, "output")       # the lists it produces
 MONTH_ENDS = os.path.join(HERE, "..", "Get month ends dates", "output", "month_end_dates.csv")
 LATEST = os.path.join(RESULT_DIR, "nifty500_latest.csv")
 REMOVED = os.path.join(RESULT_DIR, "removed_from_lists.csv")
+RENAMES_OUT = os.path.join(RESULT_DIR, "symbol_changes.csv")   # the renames used, for the next step
 NON_SHARE_SERIES = {"RR": "REIT", "IV": "InvIT"}
 HIST = os.path.join(OUT_DIR, "history")
 COPIES_DIR = os.path.join(HIST, "archive_copies")
@@ -179,6 +184,7 @@ def validate(df):
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True); os.makedirs(RESULT_DIR, exist_ok=True)
+    renames()                          # refresh output/symbol_changes.csv for the next step
     df, url = download()
     df = validate(df)
 
@@ -493,6 +499,12 @@ def renames():
         df["From"] = pd.to_datetime(df.From.astype(str).str.strip(), format="%d-%b-%Y", errors="coerce")
         extra = pd.DataFrame([{"Company": "", "Old": o, "New": n, "From": pd.Timestamp(d)} for o, n, d in EXTRA_RENAMES])
         df = pd.concat([df, extra], ignore_index=True)
+        # save the exact renames used, so the next step (combine stocks) follows the same ones without this script
+        os.makedirs(RESULT_DIR, exist_ok=True)
+        out = df.dropna(subset=["From"]).assign(Source=["NSE" if c else "added in get_nifty500.py (EXTRA_RENAMES)" for c in df.dropna(subset=["From"]).Company])
+        out.assign(From=out.From.dt.strftime("%Y-%m-%d"))[["Old", "New", "From", "Company", "Source"]] \
+            .rename(columns={"Old": "Old symbol", "New": "New symbol", "Company": "Company Name"}) \
+            .sort_values(["From", "Old symbol"]).to_csv(RENAMES_OUT, index=False)
         _REN = {}
         for r in df.dropna(subset=["From"]).sort_values("From").itertuples():
             _REN.setdefault(r.Old, []).append((r.From, r.New))
