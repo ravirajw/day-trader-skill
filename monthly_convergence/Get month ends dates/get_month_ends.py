@@ -9,8 +9,8 @@ Output: output/month_end_dates.csv
     Confirmed - the month is over; the date is NSE's own: the last day of the month that has an NSE
                 daily price file.
     Expected  - the current month, not over yet: its last weekday that is not an NSE trading holiday
-                (dependencies/output/nse_holidays.csv, made by dependencies/get_nse_holidays.py), or a
-                holiday NSE marks "*" (Diwali Muhurat trading session). The next run after the month ends
+                (NSE's published holiday list), or a holiday NSE marks "*" (Diwali Muhurat trading
+                session). The next run after the month ends
                 replaces it with the confirmed date. A special session announced later (e.g. a Budget
                 Saturday) or a surprise holiday can still change it - the confirmed date always comes
                 from NSE's files.
@@ -23,8 +23,14 @@ How a finished month is confirmed (NSE only, no other source):
   If NSE can't be reached (any answer other than file / no file), the script stops and saves nothing new:
   a date is never guessed.
 
-Holidays: if dependencies/output/nse_holidays.csv is missing, or has no holidays for the current year,
-dependencies/get_nse_holidays.py is run automatically first (used only for the Expected month).
+Holidays (used only for the Expected month): every run downloads NSE's holiday list for the current year
+(www.nseindia.com/api/holiday-master?type=trading, capital market segment; NSE publishes the next year's
+list in December and sometimes adds holidays during the year). It is only used in memory, never saved.
+If it can't be downloaded, the expected date ignores holidays and a warning is printed (the confirmed
+dates never use it).
+
+The script needs nothing else: copy this one file anywhere and run it (Python with pandas and requests,
+and internet access to NSE). The output/ folder is created when needed; nothing else is written.
 
 Usage (from this folder):
   ../.venv/bin/python get_month_ends.py              # add the months not yet in the file
@@ -34,7 +40,6 @@ Output columns: Month, Last trading day, Weekday, Status, How found
 """
 import argparse
 import os
-import subprocess
 import sys
 import time
 from datetime import date
@@ -45,8 +50,7 @@ import requests
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT_DIR = os.path.join(HERE, "output")
 OUT = os.path.join(OUT_DIR, "month_end_dates.csv")
-DEP_DIR = os.path.join(HERE, "dependencies")
-HOLIDAYS = os.path.join(DEP_DIR, "output", "nse_holidays.csv")   # made by dependencies/get_nse_holidays.py
+HOLIDAY_URL = "https://www.nseindia.com/api/holiday-master?type=trading"
 START = "2011-01"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 MAX_CLOSED_DAYS = 15        # no month ends with this many closed days in a row: more means something is wrong
@@ -90,19 +94,33 @@ def confirmed_day(per, session):
     sys.exit(f"No NSE file in the last {len(closed)} days of {per} - stopping, nothing saved.")
 
 
+def download_holidays():
+    """NSE's holiday list for the current year (capital market segment) as a DataFrame (Date, Weekday,
+    Holiday), or raises if it can't be downloaded."""
+    h = {**HEADERS, "Accept": "application/json", "Referer": "https://www.nseindia.com/"}
+    ses = requests.Session()
+    ses.get("https://www.nseindia.com/", headers=h, timeout=30)
+    r = ses.get(HOLIDAY_URL, headers=h, timeout=30)
+    r.raise_for_status()
+    cm = r.json().get("CM", [])
+    if not cm: raise ValueError("NSE's holiday list came back empty")
+    new = pd.DataFrame([{"Date": pd.to_datetime(x["tradingDate"], format="%d-%b-%Y"),
+                         "Holiday": " ".join(str(x.get("description", "")).split())} for x in cm])
+    new["Weekday"] = new.Date.dt.day_name()
+    new["Date"] = new.Date.dt.date.astype(str)
+    return new[["Date", "Weekday", "Holiday"]]
+
+
 def nse_holidays():
-    """NSE's trading holidays {date: name}, from dependencies/output/nse_holidays.csv. If that file is missing,
-    or has no holidays for the current year yet, dependencies/get_nse_holidays.py is run first to get them."""
-    year = str(date.today().year)
-    have = os.path.exists(HOLIDAYS) and pd.read_csv(HOLIDAYS, dtype=str).Date.str.startswith(year).any()
-    if not have:
-        why = "not found" if not os.path.exists(HOLIDAYS) else f"has no {year} holidays"
-        print(f"Holiday list {why}: running dependencies/get_nse_holidays.py ...", flush=True)
-        subprocess.run([sys.executable, os.path.join(DEP_DIR, "get_nse_holidays.py")], cwd=DEP_DIR)
-    if not os.path.exists(HOLIDAYS):
-        sys.exit(f"NSE holiday list still not available: {HOLIDAYS}")
-    h = pd.read_csv(HOLIDAYS, dtype=str).fillna("")
-    return dict(zip(h.Date, h.Holiday))
+    """NSE's trading holidays {date: name}, downloaded now (kept in memory only). Empty if NSE's list can't be
+    downloaded (warned)."""
+    try:
+        h = download_holidays()
+        print(f"NSE holidays for {', '.join(sorted(set(h.Date.str[:4])))}: {len(h)}")
+        return dict(zip(h.Date, h.Holiday))
+    except Exception as e:
+        print(f"  WARNING: could not download NSE's holiday list ({e}); the expected date ignores holidays")
+        return {}
 
 
 def expected_last_day(per, holidays):
